@@ -317,7 +317,6 @@ func setSiteContractServiceGraphAttrs(cont *container.Container, d *schema.Resou
 								allMap["consumer_connector_cluster_interface"] = consSplit[3]
 
 								re = regexp.MustCompile("uni/tn-(.*)/svcCont/svcRedirectPol-(.*)")
-
 								if siteMap["provider_connector_redirect_policy"] != nil {
 									split := re.FindStringSubmatch(siteMap["provider_connector_redirect_policy"].(string))
 									allMap["provider_connector_redirect_policy_tenant"] = split[1]
