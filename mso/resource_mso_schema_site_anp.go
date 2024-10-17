@@ -68,8 +68,9 @@ func resourceMSOSchemaSiteAnpImport(d *schema.ResourceData, m interface{}) ([]*s
 		return nil, fmt.Errorf("No Sites found")
 	}
 	stateSite := get_attribute[2]
+	stateTemplate := get_attribute[4]
 	found := false
-	stateAnp := get_attribute[4]
+	stateAnp := get_attribute[6]
 	for i := 0; i < count; i++ {
 		tempCont, err := cont.ArrayElement(i, "sites")
 		if err != nil {
@@ -77,7 +78,8 @@ func resourceMSOSchemaSiteAnpImport(d *schema.ResourceData, m interface{}) ([]*s
 		}
 		apiSite := models.StripQuotes(tempCont.S("siteId").String())
 
-		if apiSite == stateSite {
+		apiTemplate := models.StripQuotes(tempCont.S("templateName").String())
+		if apiSite == stateSite && apiTemplate == stateTemplate {
 
 			anpCount, err := tempCont.ArrayCount("anps")
 			if err != nil {
@@ -171,6 +173,7 @@ func resourceMSOSchemaSiteAnpRead(d *schema.ResourceData, m interface{}) error {
 		return fmt.Errorf("No Sites found")
 	}
 	stateSite := d.Get("site_id").(string)
+	stateTemplate := d.Get("template_name").(string)
 	found := false
 	stateAnp := d.Get("anp_name").(string)
 	for i := 0; i < count; i++ {
@@ -180,7 +183,7 @@ func resourceMSOSchemaSiteAnpRead(d *schema.ResourceData, m interface{}) error {
 		}
 		apiSite := models.StripQuotes(tempCont.S("siteId").String())
 
-		if apiSite == stateSite {
+		if apiSite == stateSite && apiTemplate == stateTemplate {
 			anpCount, err := tempCont.ArrayCount("anps")
 			if err != nil {
 				return fmt.Errorf("Unable to get Anp list")
