@@ -182,6 +182,7 @@ func resourceMSOSchemaSiteAnpRead(d *schema.ResourceData, m interface{}) error {
 			return err
 		}
 		apiSite := models.StripQuotes(tempCont.S("siteId").String())
+		apiTemplate := models.StripQuotes(tempCont.S("templateName").String())
 
 		if apiSite == stateSite && apiTemplate == stateTemplate {
 			anpCount, err := tempCont.ArrayCount("anps")
