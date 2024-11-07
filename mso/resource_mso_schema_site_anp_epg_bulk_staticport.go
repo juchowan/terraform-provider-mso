@@ -78,8 +78,11 @@ func resourceMSOSchemaSiteAnpEpgBulkStaticPort() *schema.Resource {
 						},
 						"leaf": {
 							Type:         schema.TypeString,
-							Required:     true,
+							Optional:     true,
 							ValidateFunc: validation.StringLenBetween(1, 1000),
+							// Remove computed because when a user updates the list and causes index shifts
+							//  the leaf state value will be used at the location of the list index when not provided in config.
+							// Computed:     true,
 						},
 						"path": {
 							Type:         schema.TypeString,
@@ -179,6 +182,7 @@ func resourceMSOSchemaSiteAnpEpgBulkStaticPortImport(d *schema.ResourceData, m i
 
 	portPath := regexp.MustCompile(`(topology\/(?P<podValue>.*)\/paths-(?P<leafValue>.*)\/extpaths-(?P<fexValue>.*)\/pathep-\[(?P<pathValue>.*)\])`)
 	vpcPath := regexp.MustCompile(`(topology\/(?P<podValue>.*)\/protpaths-(?P<leafValue>.*)\/pathep-\[(?P<pathValue>.*)\])`)
+	vpcWithFexPath := regexp.MustCompile(`(topology\/(?P<podValue>.*)\/protpaths-(?P<leafValue>.*)\/extprotpaths-(?P<fexValue>.*)\/pathep-\[(?P<pathValue>.*)\])`)
 	dpcPath := regexp.MustCompile(`(topology\/(?P<podValue>.*)\/paths-(?P<leafValue>.*)\/pathep-\[(?P<pathValue>.*)\])`)
 
 	staticPortsList := make([]interface{}, 0, 1)
@@ -212,6 +216,9 @@ func resourceMSOSchemaSiteAnpEpgBulkStaticPortImport(d *schema.ResourceData, m i
 
 		if portPath.MatchString(pathValue) {
 			matchedMap = getStaticPortPathValues(pathValue, portPath)
+			staticPortMap["fex"] = matchedMap["fexValue"]
+		} else if vpcWithFexPath.MatchString(pathValue) {
+			matchedMap = getStaticPortPathValues(pathValue, vpcWithFexPath)
 			staticPortMap["fex"] = matchedMap["fexValue"]
 		} else if vpcPath.MatchString(pathValue) {
 			matchedMap = getStaticPortPathValues(pathValue, vpcPath)
@@ -281,6 +288,8 @@ func resourceMSOSchemaSiteAnpEpgBulkStaticPortCreate(d *schema.ResourceData, m i
 
 			if staticPortMap["type"] == "port" && static_port_fex != "" {
 				portpath = fmt.Sprintf("topology/%s/paths-%s/extpaths-%s/pathep-[%s]", static_port_pod, static_port_leaf, static_port_fex, static_port_path)
+			} else if staticPortMap["type"] == "vpc" && static_port_fex != "" {
+				portpath = fmt.Sprintf("topology/%s/protpaths-%s/extprotpaths-%s/pathep-[%s]", static_port_pod, static_port_leaf, static_port_fex, static_port_path)
 			} else if staticPortMap["type"] == "vpc" {
 				portpath = fmt.Sprintf("topology/%s/protpaths-%s/pathep-[%s]", static_port_pod, static_port_leaf, static_port_path)
 			} else {
@@ -409,6 +418,7 @@ func resourceMSOSchemaSiteAnpEpgBulkStaticPortRead(d *schema.ResourceData, m int
 
 	portPath := regexp.MustCompile(`(topology\/(?P<podValue>.*)\/paths-(?P<leafValue>.*)\/extpaths-(?P<fexValue>.*)\/pathep-\[(?P<pathValue>.*)\])`)
 	vpcPath := regexp.MustCompile(`(topology\/(?P<podValue>.*)\/protpaths-(?P<leafValue>.*)\/pathep-\[(?P<pathValue>.*)\])`)
+	vpcWithFexPath := regexp.MustCompile(`(topology\/(?P<podValue>.*)\/protpaths-(?P<leafValue>.*)\/extprotpaths-(?P<fexValue>.*)\/pathep-\[(?P<pathValue>.*)\])`)
 	dpcPath := regexp.MustCompile(`(topology\/(?P<podValue>.*)\/paths-(?P<leafValue>.*)\/pathep-\[(?P<pathValue>.*)\])`)
 
 	staticPortsList := make([]interface{}, 0, 1)
@@ -442,6 +452,9 @@ func resourceMSOSchemaSiteAnpEpgBulkStaticPortRead(d *schema.ResourceData, m int
 
 		if portPath.MatchString(pathValue) {
 			matchedMap = getStaticPortPathValues(pathValue, portPath)
+			staticPortMap["fex"] = matchedMap["fexValue"]
+		} else if vpcWithFexPath.MatchString(pathValue) {
+			matchedMap = getStaticPortPathValues(pathValue, vpcWithFexPath)
 			staticPortMap["fex"] = matchedMap["fexValue"]
 		} else if vpcPath.MatchString(pathValue) {
 			matchedMap = getStaticPortPathValues(pathValue, vpcPath)
@@ -511,6 +524,8 @@ func resourceMSOSchemaSiteAnpEpgBulkStaticPortUpdate(d *schema.ResourceData, m i
 
 			if staticPortMap["type"] == "port" && static_port_fex != "" {
 				portpath = fmt.Sprintf("topology/%s/paths-%s/extpaths-%s/pathep-[%s]", static_port_pod, static_port_leaf, static_port_fex, static_port_path)
+			} else if staticPortMap["type"] == "vpc" && static_port_fex != "" {
+				portpath = fmt.Sprintf("topology/%s/protpaths-%s/extprotpaths-%s/pathep-[%s]", static_port_pod, static_port_leaf, static_port_fex, static_port_path)
 			} else if staticPortMap["type"] == "vpc" {
 				portpath = fmt.Sprintf("topology/%s/protpaths-%s/pathep-[%s]", static_port_pod, static_port_leaf, static_port_path)
 			} else {
@@ -605,6 +620,8 @@ func resourceMSOSchemaSiteAnpEpgBulkStaticPortDelete(d *schema.ResourceData, m i
 
 			if staticPortMap["path_type"] == "port" && staticPort["fex"] != "" {
 				portpath = fmt.Sprintf("topology/%s/paths-%s/extpaths-%s/pathep-[%s]", static_port_pod, static_port_leaf, static_port_fex, static_port_path)
+			} else if staticPortMap["type"] == "vpc" && static_port_fex != "" {
+				portpath = fmt.Sprintf("topology/%s/protpaths-%s/extprotpaths-%s/pathep-[%s]", static_port_pod, static_port_leaf, static_port_fex, static_port_path)
 			} else if staticPortMap["path_type"] == "vpc" {
 				portpath = fmt.Sprintf("topology/%s/protpaths-%s/pathep-[%s]", static_port_pod, static_port_leaf, static_port_path)
 			} else {
