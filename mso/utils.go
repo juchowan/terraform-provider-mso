@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
@@ -219,4 +220,106 @@ func doPatchRequest(msoClient *client.Client, path string, payloadCon *container
 	}
 
 	return nil
+}
+
+func getSchemaIdFromName(msoClient *client.Client, name string) (string, error) {
+
+	con, err := msoClient.GetViaURL("/api/v1/schemas/list-identity")
+
+	if err != nil {
+		return "", nil
+	}
+
+	schemas := con.S("schemas").Data().([]interface{})
+	for _, schema := range schemas {
+		if displayName, ok := schema.(map[string]interface{})["displayName"]; ok && displayName == name {
+			if id, ok := schema.(map[string]interface{})["id"]; ok {
+				return id.(string), nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("Schema of specified name not found")
+}
+
+func getStaticPortPathValues(pathValue string, re *regexp.Regexp) map[string]string {
+	match := re.FindStringSubmatch(pathValue) //list of matched strings
+	result := make(map[string]string)
+	for i, name := range re.SubexpNames() {
+		if i != 0 && name != "" {
+			result[name] = match[i]
+		}
+	}
+
+	return result
+}
+
+func setValuesFromPortPath(staticPortMap map[string]interface{}, pathValue string) {
+
+	portFexPath := regexp.MustCompile(`(topology\/(?P<podValue>.*)\/paths-(?P<leafValue>.*)\/extpaths-(?P<fexValue>.*)\/pathep-\[(?P<pathValue>.*)\])`)
+	vpcFexPath := regexp.MustCompile(`(topology\/(?P<podValue>.*)\/protpaths-(?P<leafValue>.*)\/extprotpaths-(?P<fexValue>.*)\/pathep-\[(?P<pathValue>.*)\])`)
+	vpcPath := regexp.MustCompile(`(topology\/(?P<podValue>.*)\/protpaths-(?P<leafValue>.*)\/pathep-\[(?P<pathValue>.*)\])`)
+	// dpcPath also handles the port without FEX defined in the path
+	dpcPath := regexp.MustCompile(`(topology\/(?P<podValue>.*)\/paths-(?P<leafValue>.*)\/pathep-\[(?P<pathValue>.*)\])`)
+
+	matchedMap := make(map[string]string)
+
+	if portFexPath.MatchString(pathValue) {
+		matchedMap = getStaticPortPathValues(pathValue, portFexPath)
+	} else if vpcFexPath.MatchString(pathValue) {
+		matchedMap = getStaticPortPathValues(pathValue, vpcFexPath)
+	} else if vpcPath.MatchString(pathValue) {
+		matchedMap = getStaticPortPathValues(pathValue, vpcPath)
+	} else if dpcPath.MatchString(pathValue) {
+		matchedMap = getStaticPortPathValues(pathValue, dpcPath)
+	}
+
+	staticPortMap["pod"] = matchedMap["podValue"]
+	staticPortMap["leaf"] = matchedMap["leafValue"]
+	staticPortMap["path"] = matchedMap["pathValue"]
+	if fexValue, ok := matchedMap["fexValue"]; ok {
+		staticPortMap["fex"] = fexValue
+	}
+
+}
+
+func createPortPath(path_type, static_port_pod, static_port_leaf, static_port_fex, static_port_path string) string {
+
+	if path_type == "port" && static_port_fex != "" {
+		return fmt.Sprintf("topology/%s/paths-%s/extpaths-%s/pathep-[%s]", static_port_pod, static_port_leaf, static_port_fex, static_port_path)
+	} else if path_type == "vpc" && static_port_fex != "" {
+		return fmt.Sprintf("topology/%s/protpaths-%s/extprotpaths-%s/pathep-[%s]", static_port_pod, static_port_leaf, static_port_fex, static_port_path)
+	} else if path_type == "vpc" {
+		return fmt.Sprintf("topology/%s/protpaths-%s/pathep-[%s]", static_port_pod, static_port_leaf, static_port_path)
+	} else {
+		return fmt.Sprintf("topology/%s/paths-%s/pathep-[%s]", static_port_pod, static_port_leaf, static_port_path)
+	}
+}
+
+func getListOfStringsFromSchemaList(d *schema.ResourceData, key string) []string {
+	if values, ok := d.GetOk(key); ok {
+		return convertToListOfStrings(values.([]interface{}))
+	}
+	return nil
+}
+
+func convertToListOfStrings(values []interface{}) []string {
+	result := []string{}
+	for _, item := range values {
+		result = append(result, item.(string))
+	}
+	return result
+}
+
+func duplicatesInList(list []string) []string {
+	duplicates := []string{}
+	set := make(map[string]int)
+	for index, item := range list {
+		if _, ok := set[item]; ok {
+			duplicates = append(duplicates, item)
+		} else {
+			set[item] = index
+		}
+	}
+	return duplicates
 }
