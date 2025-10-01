@@ -2,6 +2,7 @@ package mso
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
@@ -57,6 +58,12 @@ func Provider() terraform.ResourceProvider {
 					"mso",
 					"nd",
 				}, false),
+			},
+			"retries": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				DefaultFunc: schema.EnvDefaultFunc("MSO_RETRIES", nil),
+				Description: "Number of retries for REST API calls. Defaults to 2.",
 			},
 		},
 
@@ -117,6 +124,11 @@ func Provider() terraform.ResourceProvider {
 			"mso_schema_site_contract_service_graph":          resourceMSOSchemaSiteContractServiceGraph(),
 			"mso_schema_site_contract_service_graph_listener": resourceMSOSchemaSiteContractServiceGraphListener(),
 			"mso_template":                                    resourceMSOTemplate(),
+			"mso_tenant_policies_ipsla_monitoring_policy":     resourceMSOIPSLAMonitoringPolicy(),
+			"mso_tenant_policies_route_map_policy_multicast":  resourceMSOMcastRouteMapPolicy(),
+			"mso_tenant_policies_dhcp_relay_policy":           resourceMSOTenantPoliciesDHCPRelayPolicy(),
+			"mso_fabric_policies_vlan_pool":                   resourceMSOVlanPool(),
+			"mso_fabric_policies_physical_domain":             resourceMSOPhysicalDomain(),
 		},
 
 		DataSourcesMap: map[string]*schema.Resource{
@@ -174,6 +186,11 @@ func Provider() terraform.ResourceProvider {
 			"mso_schema_site_contract_service_graph":          dataSourceMSOSchemaSiteContractServiceGraph(),
 			"mso_schema_site_contract_service_graph_listener": dataSourceMSOSchemaSiteContractServiceGraphListener(),
 			"mso_template":                                    datasourceMSOTemplate(),
+			"mso_tenant_policies_ipsla_monitoring_policy":     datasourceMSOIPSLAMonitoringPolicy(),
+			"mso_tenant_policies_route_map_policy_multicast":  datasourceMSOMcastRouteMapPolicy(),
+			"mso_tenant_policies_dhcp_relay_policy":           datasourceMSOTenantPoliciesDHCPRelayPolicy(),
+			"mso_fabric_policies_vlan_pool":                   datasourceMSOVlanPool(),
+			"mso_fabric_policies_physical_domain":             datasourceMSOPhysicalDomain(),
 		},
 
 		ConfigureFunc: configureClient,
@@ -189,6 +206,15 @@ func configureClient(d *schema.ResourceData) (interface{}, error) {
 		ProxyUrl:   d.Get("proxy_url").(string),
 		Domain:     d.Get("domain").(string),
 		Platform:   d.Get("platform").(string),
+	}
+
+	config.MaxRetries = 2
+	if d.Get("retries").(string) != "" {
+		maxRetries, err := strconv.Atoi(d.Get("retries").(string))
+		if err != nil {
+			return nil, fmt.Errorf("Invalid value for retries")
+		}
+		config.MaxRetries = maxRetries
 	}
 
 	if err := config.Valid(); err != nil {
@@ -218,7 +244,7 @@ func (c Config) Valid() error {
 func (c Config) getClient() interface{} {
 	if c.Password != "" {
 
-		return client.GetClient(c.URL, c.Username, client.Password(c.Password), client.Insecure(c.IsInsecure), client.ProxyUrl(c.ProxyUrl), client.Domain(c.Domain), client.Platform(c.Platform))
+		return client.GetClient(c.URL, c.Username, client.Password(c.Password), client.Insecure(c.IsInsecure), client.ProxyUrl(c.ProxyUrl), client.Domain(c.Domain), client.Platform(c.Platform), client.MaxRetries(c.MaxRetries))
 
 	}
 	return nil
@@ -233,4 +259,5 @@ type Config struct {
 	URL        string
 	Domain     string
 	Platform   string
+	MaxRetries int
 }

@@ -48,6 +48,11 @@ func resourceMSOSchemaTemplateVrf() *schema.Resource {
 				Required: true,
 			},
 
+			"uuid": &schema.Schema{
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+
 			"layer3_multicast": &schema.Schema{
 				Type:     schema.TypeBool,
 				Optional: true,
@@ -86,6 +91,34 @@ func resourceMSOSchemaTemplateVrf() *schema.Resource {
 				Type:     schema.TypeBool,
 				Optional: true,
 				Computed: true,
+			},
+
+			"rendezvous_points": &schema.Schema{
+				Type:     schema.TypeSet,
+				Optional: true,
+				Computed: true,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"ip_address": &schema.Schema{
+							Type:     schema.TypeString,
+							Required: true,
+						},
+						"type": &schema.Schema{
+							Type: schema.TypeString,
+							ValidateFunc: validation.StringInSlice([]string{
+								"static",
+								"fabric",
+								"unknown",
+							}, false),
+							Required: true,
+						},
+						"route_map_policy_multicast_uuid": &schema.Schema{
+							Type:     schema.TypeString,
+							Optional: true,
+							Computed: true,
+						},
+					},
+				},
 			},
 		}),
 	}
@@ -130,6 +163,7 @@ func resourceMSOSchemaTemplateVrfImport(d *schema.ResourceData, m interface{}) (
 					d.SetId(currentVrfName)
 					d.Set("name", currentVrfName)
 					d.Set("display_name", models.StripQuotes(vrfCont.S("displayName").String()))
+					d.Set("uuid", models.StripQuotes(vrfCont.S("uuid").String()))
 					if vrfCont.Exists("l3MCast") {
 						l3Mcast, _ := strconv.ParseBool(models.StripQuotes(vrfCont.S("l3MCast").String()))
 						d.Set("layer3_multicast", l3Mcast)
@@ -152,6 +186,25 @@ func resourceMSOSchemaTemplateVrfImport(d *schema.ResourceData, m interface{}) (
 						siteAwarePolicyEnforcementMode, _ := strconv.ParseBool(models.StripQuotes(vrfCont.S("siteAwarePolicyEnforcementMode").String()))
 						d.Set("site_aware_policy_enforcement", siteAwarePolicyEnforcementMode)
 					}
+					if vrfCont.Exists("rpConfigs") {
+						rpCount, err := vrfCont.ArrayCount("rpConfigs")
+						if err != nil {
+							return nil, fmt.Errorf("no rendezvous points found")
+						}
+						rendezvousPoints := make([]interface{}, 0)
+						for k := range rpCount {
+							rpCont, err := vrfCont.ArrayElement(k, "rpConfigs")
+							if err != nil {
+								return nil, fmt.Errorf("unable to parse the rendezvous points list")
+							}
+							rpConfig := make(map[string]interface{})
+							rpConfig["ip_address"] = models.StripQuotes(rpCont.S("ipAddress").String())
+							rpConfig["type"] = models.StripQuotes(rpCont.S("rpType").String())
+							rpConfig["route_map_policy_multicast_uuid"] = models.StripQuotes(rpCont.S("mcastRtMapPolicyRef").String())
+							rendezvousPoints = append(rendezvousPoints, rpConfig)
+						}
+						d.Set("rendezvous_points", rendezvousPoints)
+					}
 					found = true
 					break
 				}
@@ -165,6 +218,7 @@ func resourceMSOSchemaTemplateVrfImport(d *schema.ResourceData, m interface{}) (
 		d.SetId("")
 		d.Set("name", "")
 		d.Set("display_name", "")
+		d.Set("uuid", "")
 	}
 
 	log.Printf("[DEBUG] %s: Schema Template Vrf Import finished successfully", d.Id())
@@ -225,7 +279,27 @@ func resourceMSOSchemaTemplateVrfCreate(d *schema.ResourceData, m interface{}) e
 		siteAwarePolicyEnforcementMode = site_aware_policy_enforcement.(bool)
 	}
 
-	schemaTemplateVrfApp := models.NewSchemaTemplateVrf("add", fmt.Sprintf("/templates/%s/vrfs/-", templateName), Name, displayName, ipDataPlaneLearning, description, l3m, vzany, preferredGroup, siteAwarePolicyEnforcementMode)
+	rendezvousPoints := make([]interface{}, 0, 1)
+	if val, ok := d.GetOk("rendezvous_points"); ok {
+		rp_list := val.(*schema.Set).List()
+		for _, val := range rp_list {
+
+			rpConfig := make(map[string]interface{})
+			rendezvousPoint := val.(map[string]interface{})
+			if rendezvousPoint["ip_address"] != "" {
+				rpConfig["ipAddress"] = fmt.Sprintf("%v", rendezvousPoint["ip_address"])
+			}
+			if rendezvousPoint["type"] != "" {
+				rpConfig["rpType"] = fmt.Sprintf("%v", rendezvousPoint["type"])
+			}
+			if rendezvousPoint["route_map_policy_multicast_uuid"] != "" {
+				rpConfig["mcastRtMapPolicyRef"] = fmt.Sprintf("%v", rendezvousPoint["route_map_policy_multicast_uuid"])
+			}
+			rendezvousPoints = append(rendezvousPoints, rpConfig)
+		}
+	}
+
+	schemaTemplateVrfApp := models.NewSchemaTemplateVrf("add", fmt.Sprintf("/templates/%s/vrfs/-", templateName), Name, displayName, ipDataPlaneLearning, description, l3m, vzany, preferredGroup, siteAwarePolicyEnforcementMode, rendezvousPoints)
 
 	_, err := msoClient.PatchbyID(fmt.Sprintf("api/v1/schemas/%s", schemaId), schemaTemplateVrfApp)
 	if err != nil {
@@ -293,7 +367,27 @@ func resourceMSOSchemaTemplateVrfUpdate(d *schema.ResourceData, m interface{}) e
 		siteAwarePolicyEnforcementMode = site_aware_policy_enforcement.(bool)
 	}
 
-	schemaTemplateVrfApp := models.NewSchemaTemplateVrf("replace", fmt.Sprintf("/templates/%s/vrfs/%s", templateName, Name), Name, displayName, ipDataPlaneLearning, description, l3m, vzany, preferredGroup, siteAwarePolicyEnforcementMode)
+	rendezvousPoints := make([]interface{}, 0, 1)
+	if val, ok := d.GetOk("rendezvous_points"); ok {
+		rp_list := val.(*schema.Set).List()
+		for _, val := range rp_list {
+
+			rpConfig := make(map[string]interface{})
+			rendezvousPoint := val.(map[string]interface{})
+			if rendezvousPoint["ip_address"] != "" {
+				rpConfig["ipAddress"] = fmt.Sprintf("%v", rendezvousPoint["ip_address"])
+			}
+			if rendezvousPoint["type"] != "" {
+				rpConfig["rpType"] = fmt.Sprintf("%v", rendezvousPoint["type"])
+			}
+			if rendezvousPoint["route_map_policy_multicast_uuid"] != "" {
+				rpConfig["mcastRtMapPolicyRef"] = fmt.Sprintf("%v", rendezvousPoint["route_map_policy_multicast_uuid"])
+			}
+			rendezvousPoints = append(rendezvousPoints, rpConfig)
+		}
+	}
+
+	schemaTemplateVrfApp := models.NewSchemaTemplateVrf("replace", fmt.Sprintf("/templates/%s/vrfs/%s", templateName, Name), Name, displayName, ipDataPlaneLearning, description, l3m, vzany, preferredGroup, siteAwarePolicyEnforcementMode, rendezvousPoints)
 
 	_, err := msoClient.PatchbyID(fmt.Sprintf("api/v1/schemas/%s", schemaId), schemaTemplateVrfApp)
 	if err != nil {
@@ -355,6 +449,9 @@ func resourceMSOSchemaTemplateVrfRead(d *schema.ResourceData, m interface{}) err
 					if vrfCont.Exists("displayName") {
 						d.Set("display_name", models.StripQuotes(vrfCont.S("displayName").String()))
 					}
+					if vrfCont.Exists("uuid") {
+						d.Set("uuid", models.StripQuotes(vrfCont.S("uuid").String()))
+					}
 					if vrfCont.Exists("l3MCast") {
 						l3Mcast, _ := strconv.ParseBool(models.StripQuotes(vrfCont.S("l3MCast").String()))
 						d.Set("layer3_multicast", l3Mcast)
@@ -377,6 +474,25 @@ func resourceMSOSchemaTemplateVrfRead(d *schema.ResourceData, m interface{}) err
 						siteAwarePolicyEnforcementMode, _ := strconv.ParseBool(models.StripQuotes(vrfCont.S("siteAwarePolicyEnforcementMode").String()))
 						d.Set("site_aware_policy_enforcement", siteAwarePolicyEnforcementMode)
 					}
+					if vrfCont.Exists("rpConfigs") {
+						rpCount, err := vrfCont.ArrayCount("rpConfigs")
+						if err != nil {
+							return err
+						}
+						rendezvousPoints := make([]interface{}, 0)
+						for k := range rpCount {
+							rpCont, err := vrfCont.ArrayElement(k, "rpConfigs")
+							if err != nil {
+								return err
+							}
+							rpConfig := make(map[string]interface{})
+							rpConfig["ip_address"] = models.StripQuotes(rpCont.S("ipAddress").String())
+							rpConfig["type"] = models.StripQuotes(rpCont.S("rpType").String())
+							rpConfig["route_map_policy_multicast_uuid"] = models.StripQuotes(rpCont.S("mcastRtMapPolicyRef").String())
+							rendezvousPoints = append(rendezvousPoints, rpConfig)
+						}
+						d.Set("rendezvous_points", rendezvousPoints)
+					}
 					found = true
 					break
 				}
@@ -390,6 +506,7 @@ func resourceMSOSchemaTemplateVrfRead(d *schema.ResourceData, m interface{}) err
 		d.SetId("")
 		d.Set("name", "")
 		d.Set("display_name", "")
+		d.Set("uuid", "")
 	}
 	log.Printf("[DEBUG] %s: Read finished successfully", d.Id())
 	return nil

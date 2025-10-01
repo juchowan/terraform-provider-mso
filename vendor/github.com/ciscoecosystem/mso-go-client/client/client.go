@@ -3,15 +3,19 @@ package client
 import (
 	"bytes"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
@@ -28,6 +32,10 @@ const ndAuthPayload = `{
 	"userPasswd": "%s"
 }`
 
+const DefaultBackoffMinDelay int = 4
+const DefaultBackoffMaxDelay int = 60
+const DefaultBackoffDelayFactor float64 = 3
+
 // Client is the main entry point
 type Client struct {
 	BaseURL            *url.URL
@@ -37,12 +45,21 @@ type Client struct {
 	username           string
 	password           string
 	insecure           bool
+	reqTimeoutSet      bool
+	reqTimeoutVal      uint32
 	proxyUrl           string
 	domain             string
 	platform           string
 	version            string
 	skipLoggingPayload bool
+	maxRetries         int
+	maxReAuthRetries   int
+	backoffMinDelay    int
+	backoffMaxDelay    int
+	backoffDelayFactor float64
 }
+
+type CallbackRetryFunc func(*container.Container) bool
 
 // singleton implementation of a client
 var clientImpl *Client
@@ -91,6 +108,36 @@ func SkipLoggingPayload(skipLoggingPayload bool) Option {
 	}
 }
 
+func MaxRetries(maxRetries int) Option {
+	return func(client *Client) {
+		client.maxRetries = maxRetries
+	}
+}
+
+func MaxReAuthRetries(maxReAuthRetries int) Option {
+	return func(client *Client) {
+		client.maxReAuthRetries = maxReAuthRetries
+	}
+}
+
+func BackoffMinDelay(backoffMinDelay int) Option {
+	return func(client *Client) {
+		client.backoffMinDelay = backoffMinDelay
+	}
+}
+
+func BackoffMaxDelay(backoffMaxDelay int) Option {
+	return func(client *Client) {
+		client.backoffMaxDelay = backoffMaxDelay
+	}
+}
+
+func BackoffDelayFactor(backoffDelayFactor float64) Option {
+	return func(client *Client) {
+		client.backoffDelayFactor = backoffDelayFactor
+	}
+}
+
 func initClient(clientUrl, username string, options ...Option) *Client {
 	var transport *http.Transport
 	bUrl, err := url.Parse(clientUrl)
@@ -99,9 +146,10 @@ func initClient(clientUrl, username string, options ...Option) *Client {
 		log.Fatal(err)
 	}
 	client := &Client{
-		BaseURL:    bUrl,
-		username:   username,
-		httpClient: http.DefaultClient,
+		BaseURL:          bUrl,
+		username:         username,
+		httpClient:       http.DefaultClient,
+		maxReAuthRetries: 3,
 	}
 
 	for _, option := range options {
@@ -157,16 +205,16 @@ func (c *Client) useInsecureHTTPClient(insecure bool) *http.Transport {
 	return transport
 }
 
-func (c *Client) MakeRestRequest(method string, path string, body *container.Container, authenticated bool) (*http.Request, error) {
-	if c.platform == "nd" && path != "/login" {
-		if strings.HasPrefix(path, "/") {
-			path = path[1:]
-		}
-		path = fmt.Sprintf("mso/%v", path)
+func (c *Client) MakeFullUrl(method string, path string) (string, error) {
+	path = strings.TrimLeft(path, "/")
+	if c.platform == "nd" && path != "login" {
+		path = fmt.Sprintf("/mso/%v", path)
+	} else {
+		path = fmt.Sprintf("/%v", path)
 	}
 	url, err := url.Parse(path)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if method == "PATCH" {
 		validateString := url.Query()
@@ -174,11 +222,19 @@ func (c *Client) MakeRestRequest(method string, path string, body *container.Con
 		url.RawQuery = validateString.Encode()
 	}
 	fURL := c.BaseURL.ResolveReference(url)
+	return fURL.String(), nil
+}
+
+func (c *Client) MakeRestRequest(method string, path string, body *container.Container, authenticated bool) (*http.Request, error) {
+	fullUrl, err := c.MakeFullUrl(method, path)
+	if err != nil {
+		return nil, err
+	}
 	var req *http.Request
 	if method == "GET" || method == "DELETE" {
-		req, err = http.NewRequest(method, fURL.String(), nil)
+		req, err = http.NewRequest(method, fullUrl, nil)
 	} else {
-		req, err = http.NewRequest(method, fURL.String(), bytes.NewBuffer((body.Bytes())))
+		req, err = http.NewRequest(method, fullUrl, bytes.NewBuffer((body.Bytes())))
 	}
 	if err != nil {
 		return nil, err
@@ -348,36 +404,188 @@ func StrtoInt(s string, startIndex int, bitSize int) (int64, error) {
 }
 
 func (c *Client) Do(req *http.Request) (*container.Container, *http.Response, error) {
-	log.Printf("[DEBUG] Begining DO method %s", req.URL.String())
-	log.Printf("[TRACE] HTTP Request Method and URL: %s %s", req.Method, req.URL.String())
-	if !c.skipLoggingPayload {
-		log.Printf("[TRACE] HTTP Request Body: %v", req.Body)
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, nil, err
-	}
-	log.Printf("[DEBUG] HTTP Request: %s %s", req.Method, req.URL.String())
-	log.Printf("[DEBUG] HTTP Response: %d %s %v", resp.StatusCode, resp.Status, resp)
+	return c.DoWithRetryFunc(req, nil)
+}
 
-	bodyBytes, err := ioutil.ReadAll(resp.Body)
-	bodyStr := string(bodyBytes)
-	resp.Body.Close()
-	log.Printf("[DEBUG] HTTP response unique string %s %s %s", req.Method, req.URL.String(), bodyStr)
-	if req.Method != "DELETE" && resp.StatusCode != 204 {
-		obj, err := container.ParseJSON(bodyBytes)
+func (c *Client) DoWithRetryFunc(req *http.Request, retryFunc CallbackRetryFunc) (*container.Container, *http.Response, error) {
+	log.Printf("[DEBUG] Begining DO method %s", req.URL.String())
+	reAuthCounter := 1
+	for attempts := 1; ; attempts++ {
+		log.Printf("[TRACE] HTTP Request Method and URL: %s %s", req.Method, req.URL.String())
+
+		if !c.skipLoggingPayload {
+			log.Printf("[TRACE] HTTP Request Body: %v", req.Body)
+		}
+
+		resp, err := c.httpClient.Do(req)
 
 		if err != nil {
-			log.Printf("Error occured while json parsing %+v", err)
-			return nil, resp, err
+			if ok := c.backoff(attempts); !ok {
+				log.Printf("[ERROR] HTTP Connection error occured: %+v", err)
+				log.Printf("[DEBUG] Exit from Do method")
+				return nil, nil, err
+			} else {
+				log.Printf("[ERROR] HTTP Connection failed: %s, retries: %v", err, attempts)
+				continue
+			}
 		}
-		log.Printf("[DEBUG] Exit from do method")
+
+		if !c.skipLoggingPayload {
+			log.Printf("[TRACE] HTTP Response: %d %s %v", resp.StatusCode, resp.Status, resp)
+		} else {
+			log.Printf("[TRACE] HTTP Response: %d %s", resp.StatusCode, resp.Status)
+		}
+
+		bodyBytes, err := ioutil.ReadAll(resp.Body)
+		bodyStr := string(bodyBytes)
+		resp.Body.Close()
+		if !c.skipLoggingPayload {
+			log.Printf("[DEBUG] HTTP response unique string %s %s %s", req.Method, req.URL.String(), bodyStr)
+		}
+
+		retry := false
+
+		// 204 No Content for any requests
+		if resp.StatusCode == 204 {
+			log.Printf("[DEBUG] Exit from Do method")
+			return nil, nil, nil
+		}
+
+		var obj *container.Container
+		// Check 2xx status codes
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			obj, err = container.ParseJSON(bodyBytes)
+			if err != nil {
+				// Attempt retry if JSON parsing fails but status code is 2xx
+				// Assumption here is that packets were somehow corrupted/lost during transmission
+				log.Printf("[ERROR] Error occurred while JSON parsing (2xx status): %+v", err)
+				retry = true
+			} else {
+				// JSON parsing was successful for a 2xx response.
+				// Now, check the custom retry function.
+				if retryFunc != nil && retryFunc(obj) {
+					log.Printf("[DEBUG] Custom retry function indicated a retry is needed for 2xx response")
+					retry = true
+				} else {
+					// If JSON parsed successfully and retryFunc does not indicate a retry,
+					// then this is a successful operation.
+					log.Printf("[DEBUG] Exit from Do method")
+					return obj, resp, nil
+				}
+			}
+		}
+
+		// Handle session timeout for login based requests
+		if resp.StatusCode == 401 {
+			obj, err = container.ParseJSON(bodyBytes)
+			if err != nil {
+				log.Printf("[DEBUG] Authorization error with status code 401")
+			} else {
+				errorMessage := obj.S("error").String()
+				log.Printf("[DEBUG] Authorization error with status code 401: %+v", errorMessage)
+			}
+			log.Printf("[DEBUG] Checking max re-authentication retries: %v on %v", reAuthCounter, c.maxReAuthRetries)
+			if reAuthCounter < c.maxReAuthRetries {
+				log.Printf("[DEBUG] Retrying authentication after 401 error")
+				c.AuthToken = nil
+				req, err = c.InjectAuthenticationHeader(req, "")
+				if err == nil {
+					retry = true
+					reAuthCounter = reAuthCounter + 1
+					// If re-authentication is successful, not counting previous query as an attempt
+					attempts = attempts - 1
+					log.Printf("[DEBUG] Retrying same request after status 401 and re-authentication")
+				} else {
+					log.Printf("[ERROR] Error when retrying authentication after 401 error: %v", err)
+				}
+			} else {
+				log.Printf("[ERROR] Not retrying authentication after 401 error due to maximum re-authentication retries reached")
+			}
+		}
+
+		// Attempt retry for the following error codes:
+		//  429 Too Many Requests
+		//  503 Service Unavailable
+		if resp.StatusCode == 429 || resp.StatusCode == 503 {
+			retry = true
+		}
+
+		// Attempt retry for 500 Internal error exception to handle incorrect status code from NDO
+		// This status code / error combination will be converted to a 503 status code in later versions of NDO
+		if resp.StatusCode == 500 {
+			var errorMap map[string]string
+			err := json.Unmarshal(bodyBytes, &errorMap)
+			if err == nil {
+				errorString := errorMap["error"]
+				if errorString == "There was a problem proxying the request" {
+					log.Printf("[DEBUG] Retrying response status 500 error with message: %s", errorString)
+					retry = true
+				} else if errorString != "" {
+					log.Printf("[TRACE] Not retrying response status 500 error with message: %s", errorString)
+				} else {
+					log.Printf("[TRACE] Not retrying response status 500 error without message")
+				}
+			}
+		}
+
+		if retry {
+			log.Printf("[ERROR] HTTP Request failed with status code %d, retrying...", resp.StatusCode)
+			if ok := c.backoff(attempts); !ok {
+				log.Printf("[ERROR] HTTP Request failed with status code %d, retries exhausted", resp.StatusCode)
+				log.Printf("[DEBUG] Exit from Do method")
+				return obj, resp, fmt.Errorf("[ERROR] HTTP Request failed with status code %d after %d attempts", resp.StatusCode, attempts)
+			} else {
+				log.Printf("[DEBUG] Retrying HTTP Request after backoff")
+				continue
+			}
+		}
+
+		// For non-2xx responses, we need to try to retrieve the error from the message
+		if !(resp.StatusCode >= 200 && resp.StatusCode < 300) {
+			obj, err = container.ParseJSON(bodyBytes)
+			if err != nil {
+				log.Printf("[ERROR] Error occurred while JSON parsing for error message (non-2xx status): %+v", err)
+				return nil, resp, err
+			}
+		}
+		log.Printf("[DEBUG] Exit from Do method")
 		return obj, resp, err
-	} else if resp.StatusCode == 204 {
-		return nil, nil, nil
-	} else {
-		return nil, resp, err
 	}
+}
+
+func (c *Client) backoff(attempts int) bool {
+	log.Printf("[DEBUG] Begining backoff method: attempts %v on %v", attempts, c.maxRetries)
+	if attempts > c.maxRetries {
+		log.Printf("[DEBUG] Exit from backoff method with return value false")
+		return false
+	}
+
+	minDelay := time.Duration(DefaultBackoffMinDelay) * time.Second
+	if c.backoffMinDelay != 0 {
+		minDelay = time.Duration(c.backoffMinDelay) * time.Second
+	}
+
+	maxDelay := time.Duration(DefaultBackoffMaxDelay) * time.Second
+	if c.backoffMaxDelay != 0 {
+		maxDelay = time.Duration(c.backoffMaxDelay) * time.Second
+	}
+
+	factor := DefaultBackoffDelayFactor
+	if c.backoffDelayFactor != 0 {
+		factor = c.backoffDelayFactor
+	}
+
+	min := float64(minDelay)
+	backoff := min * math.Pow(factor, float64(attempts))
+	if backoff > float64(maxDelay) {
+		backoff = float64(maxDelay)
+	}
+	backoff = (rand.Float64()/2+0.5)*(backoff-min) + min
+	backoffDuration := time.Duration(backoff)
+	log.Printf("[TRACE] Start sleeping for %v seconds", backoffDuration.Round(time.Second))
+	time.Sleep(backoffDuration)
+	log.Printf("[DEBUG] Exit from backoff method with return value true")
+	return true
 }
 
 func stripQuotes(word string) string {

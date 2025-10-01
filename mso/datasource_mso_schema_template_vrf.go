@@ -37,6 +37,10 @@ func datasourceMSOSchemaTemplateVrf() *schema.Resource {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
+			"uuid": &schema.Schema{
+				Type:     schema.TypeString,
+				Computed: true,
+			},
 			"layer3_multicast": &schema.Schema{
 				Type:     schema.TypeBool,
 				Computed: true,
@@ -60,6 +64,26 @@ func datasourceMSOSchemaTemplateVrf() *schema.Resource {
 			"site_aware_policy_enforcement": &schema.Schema{
 				Type:     schema.TypeBool,
 				Computed: true,
+			},
+			"rendezvous_points": &schema.Schema{
+				Type:     schema.TypeList,
+				Computed: true,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"ip_address": &schema.Schema{
+							Type:     schema.TypeString,
+							Computed: true,
+						},
+						"type": &schema.Schema{
+							Type:     schema.TypeString,
+							Computed: true,
+						},
+						"route_map_policy_multicast_uuid": &schema.Schema{
+							Type:     schema.TypeString,
+							Computed: true,
+						},
+					},
+				},
 			},
 		}),
 	}
@@ -103,6 +127,7 @@ func datasourceMSOSchemaTemplateVrfRead(d *schema.ResourceData, m interface{}) e
 					d.Set("name", currentVrfName)
 					d.Set("template", currentTemplateName)
 					d.Set("display_name", models.StripQuotes(vrfCont.S("displayName").String()))
+					d.Set("uuid", models.StripQuotes(vrfCont.S("uuid").String()))
 					if vrfCont.Exists("l3MCast") {
 						l3Mcast, _ := strconv.ParseBool(models.StripQuotes(vrfCont.S("l3MCast").String()))
 						d.Set("layer3_multicast", l3Mcast)
@@ -124,6 +149,25 @@ func datasourceMSOSchemaTemplateVrfRead(d *schema.ResourceData, m interface{}) e
 					if vrfCont.Exists("siteAwarePolicyEnforcementMode") {
 						siteAwarePolicyEnforcementMode, _ := strconv.ParseBool(models.StripQuotes(vrfCont.S("siteAwarePolicyEnforcementMode").String()))
 						d.Set("site_aware_policy_enforcement", siteAwarePolicyEnforcementMode)
+					}
+					if vrfCont.Exists("rpConfigs") {
+						rpCount, err := vrfCont.ArrayCount("rpConfigs")
+						if err != nil {
+							return err
+						}
+						rendezvousPoints := make([]interface{}, 0)
+						for k := range rpCount {
+							rpCont, err := vrfCont.ArrayElement(k, "rpConfigs")
+							if err != nil {
+								return err
+							}
+							rpConfig := make(map[string]interface{})
+							rpConfig["ip_address"] = models.StripQuotes(rpCont.S("ipAddress").String())
+							rpConfig["type"] = models.StripQuotes(rpCont.S("rpType").String())
+							rpConfig["route_map_policy_multicast_uuid"] = models.StripQuotes(rpCont.S("mcastRtMapPolicyRef").String())
+							rendezvousPoints = append(rendezvousPoints, rpConfig)
+						}
+						d.Set("rendezvous_points", rendezvousPoints)
 					}
 					found = true
 					break

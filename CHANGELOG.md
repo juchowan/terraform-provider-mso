@@ -1,3 +1,33 @@
+## 1.5.3 (August 21, 2025)
+BUG FIXES:
+- Fix error handling issue that ignore error messages returned by the API for non 200 status responses introduced in v1.5.1
+
+## 1.5.2 (August 8, 2025)
+BUG FIXES:
+- Add re-login and retry mechanism to fix issue when login session expire and 401 is returned
+
+## 1.5.1 (July 24, 2025)
+BUG FIXES:
+- Fix mso_schema_site to add a retry mechanism on a pending undeploy operation and display error message when failing to undeploy
+- Add ability to retry status code 500 error when the error string is matching a proxy request error
+
+## 1.5.0 (July 17, 2025)
+IMPROVEMENTS:
+- Add mso_fabric_policies_physical_domain resource and datasource.
+- Add mso_fabric_policies_vlan_pool resource and datasource.
+- Add mso_tenant_policies_dhcp_relay_policy resource and datasource.
+- Add mso_tenant_policies_ipsla_monitoring_policy resource and datasource. 
+- Add mso_tenant_policies_route_map_policy_multicast resource and datasource.
+- Add ability to wait for deploy task to finish and display error message if present in resource_ndo_schema_template_deploy.
+- Add retry mechanism to provider for failed API requests due to network or capacity issues.
+- Add uuid attribute to mso_schema_template_anp_epg and mso_schema_template_external_epg resources and datasources.
+- Add rendezvous_points attribute in mso_schema_template_vrf resource and datasource.
+
+## 1.4.0 (January 22, 2025)
+IMPROVEMENTS:
+- Add support for dpc path_type input with fex for mso_schema_site_anp_epg_staticport and mso_schema_site_anp_epg_bulk_staticport resources
+- Add support for endpoint move detection mode in schema_template_bd
+
 ## 1.3.0 (December 2, 2024)
 BUG FIXES:
 - Fix fex and micro_seg_vlan attributes in resource_mso_schema_site_anp_epg_bulk_staticport to be correctly set when index shift occur in the static_ports list
