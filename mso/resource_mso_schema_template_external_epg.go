@@ -152,117 +152,114 @@ func resourceMSOTemplateExtenalepgImport(d *schema.ResourceData, m interface{}) 
 	msoClient := m.(*client.Client)
 	get_attribute := strings.Split(d.Id(), "/")
 	schemaId := get_attribute[0]
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	stateTemplate := get_attribute[2]
+	stateExternalepg := get_attribute[4]
+
+	// Use the new specific external EPG endpoint
+	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s/templates/%s/externalEpgs/%s", schemaId, stateTemplate, stateExternalepg))
 	if err != nil {
 		return nil, err
 	}
-	count, err := cont.ArrayCount("templates")
-	if err != nil {
-		return nil, fmt.Errorf("No Template found")
-	}
-	stateTemplate := get_attribute[2]
-	found := false
-	stateExternalepg := get_attribute[4]
-	for i := 0; i < count; i++ {
-		tempCont, err := cont.ArrayElement(i, "templates")
-		if err != nil {
-			return nil, err
-		}
-		apiTemplate := models.StripQuotes(tempCont.S("name").String())
 
-		if apiTemplate == stateTemplate {
-			externalepgCount, err := tempCont.ArrayCount("externalEpgs")
-			if err != nil {
-				return nil, fmt.Errorf("Unable to get Externalepg list")
-			}
-			for j := 0; j < externalepgCount; j++ {
-				externalepgCont, err := tempCont.ArrayElement(j, "externalEpgs")
-				if err != nil {
-					return nil, err
-				}
-				apiExternalepg := models.StripQuotes(externalepgCont.S("name").String())
-				if apiExternalepg == stateExternalepg {
-					d.SetId(get_attribute[4])
-					d.Set("external_epg_name", apiExternalepg)
-					d.Set("uuid", models.StripQuotes(externalepgCont.S("uuid").String()))
-					d.Set("schema_id", schemaId)
-					d.Set("template_name", apiTemplate)
-					d.Set("display_name", models.StripQuotes(externalepgCont.S("displayName").String()))
-					d.Set("description", models.StripQuotes(externalepgCont.S("description").String()))
-					d.Set("external_epg_type", models.StripQuotes(externalepgCont.S("extEpgType").String()))
-					if externalepgCont.Exists("preferredGroup") {
-						d.Set("include_in_preferred_group", externalepgCont.S("preferredGroup").Data().(bool))
-					} else {
-						d.Set("include_in_preferred_group", false)
-					}
+	// Set basic resource attributes
+	d.Set("schema_id", schemaId)
+	d.Set("template_name", stateTemplate)
 
-					vrfRef := models.StripQuotes(externalepgCont.S("vrfRef").String())
-					re := regexp.MustCompile("/schemas/(.*)/templates/(.*)/vrfs/(.*)")
-					match := re.FindStringSubmatch(vrfRef)
-					d.Set("vrf_name", match[3])
-					d.Set("vrf_schema_id", match[1])
-					d.Set("vrf_template_name", match[2])
-					l3outRef := models.StripQuotes(externalepgCont.S("l3outRef").String())
-					if l3outRef != "{}" && l3outRef != "" {
-						reL3out := regexp.MustCompile("/schemas/(.*)/templates/(.*)/l3outs/(.*)")
-						matchL3out := reL3out.FindStringSubmatch(l3outRef)
-						d.Set("l3out_name", matchL3out[3])
-						d.Set("l3out_schema_id", matchL3out[1])
-						d.Set("l3out_template_name", matchL3out[2])
-					} else {
-						d.Set("l3out_name", "")
-						d.Set("l3out_schema_id", "")
-						d.Set("l3out_template_name", "")
-					}
-
-					anpRef := models.StripQuotes(externalepgCont.S("anpRef").String())
-					if anpRef != "{}" && anpRef != "" {
-						tokens := strings.Split(anpRef, "/")
-						d.Set("anp_name", tokens[len(tokens)-1])
-						d.Set("anp_schema_id", tokens[len(tokens)-5])
-						d.Set("anp_template_name", tokens[len(tokens)-3])
-					} else {
-						d.Set("anp_name", "")
-						d.Set("anp_schema_id", "")
-						d.Set("anp_template_name", "")
-					}
-
-					epgType := d.Get("external_epg_type").(string)
-					if epgType == "cloud" {
-						selList := externalepgCont.S("selectors").Data().([]interface{})
-						if len(selList) > 0 {
-							selector := selList[0].(map[string]interface{})
-							d.Set("selector_name", selector["name"])
-							expList := selector["expressions"].([]interface{})
-							if len(expList) > 0 {
-								exp := expList[0].(map[string]interface{})
-								d.Set("selector_ip", exp["value"])
-							} else {
-								d.Set("selector_ip", "")
-							}
-						} else {
-							d.Set("selector_name", "")
-							d.Set("selector_ip", "")
-						}
-					} else {
-						d.Set("site_id", make([]interface{}, 0, 1))
-						d.Set("selector_name", "")
-						d.Set("selector_ip", "")
-					}
-					found = true
-					break
-				}
-			}
-		}
-	}
-
-	if !found {
+	// Check if the response contains the external EPG data wrapped in "externalEpg" object
+	if !cont.Exists("externalEpg") {
 		d.SetId("")
+		return []*schema.ResourceData{d}, fmt.Errorf("Unable to find external EPG data in response for EPG %s in Template %s of Schema Id %s", stateExternalepg, stateTemplate, schemaId)
+	}
+
+	// Get the external EPG container directly from the "externalEpg" wrapper
+	externalepgCont := cont.S("externalEpg")
+
+	// Verify the external EPG name matches what we expect
+	apiExternalepg := models.StripQuotes(externalepgCont.S("name").String())
+	if apiExternalepg != stateExternalepg {
+		d.SetId("")
+		return []*schema.ResourceData{d}, fmt.Errorf("Expected external EPG name %s, but got %s", stateExternalepg, apiExternalepg)
+	}
+
+	// Set all the resource data attributes
+	d.SetId(stateExternalepg)
+	d.Set("external_epg_name", apiExternalepg)
+	d.Set("uuid", models.StripQuotes(externalepgCont.S("uuid").String()))
+	d.Set("display_name", models.StripQuotes(externalepgCont.S("displayName").String()))
+	d.Set("description", models.StripQuotes(externalepgCont.S("description").String()))
+	d.Set("external_epg_type", models.StripQuotes(externalepgCont.S("extEpgType").String()))
+
+	if externalepgCont.Exists("preferredGroup") {
+		d.Set("include_in_preferred_group", externalepgCont.S("preferredGroup").Data().(bool))
+	} else {
+		d.Set("include_in_preferred_group", false)
+	}
+
+	// Handle VRF reference
+	vrfRef := models.StripQuotes(externalepgCont.S("vrfRef").String())
+	re := regexp.MustCompile("/schemas/(.*)/templates/(.*)/vrfs/(.*)")
+	match := re.FindStringSubmatch(vrfRef)
+	if len(match) == 4 {
+		d.Set("vrf_name", match[3])
+		d.Set("vrf_schema_id", match[1])
+		d.Set("vrf_template_name", match[2])
+	}
+
+	// Handle L3Out reference
+	l3outRef := models.StripQuotes(externalepgCont.S("l3outRef").String())
+	if l3outRef != "{}" && l3outRef != "" {
+		reL3out := regexp.MustCompile("/schemas/(.*)/templates/(.*)/l3outs/(.*)")
+		matchL3out := reL3out.FindStringSubmatch(l3outRef)
+		if len(matchL3out) == 4 {
+			d.Set("l3out_name", matchL3out[3])
+			d.Set("l3out_schema_id", matchL3out[1])
+			d.Set("l3out_template_name", matchL3out[2])
+		}
+	} else {
+		d.Set("l3out_name", "")
+		d.Set("l3out_schema_id", "")
+		d.Set("l3out_template_name", "")
+	}
+
+	// Handle ANP reference
+	anpRef := models.StripQuotes(externalepgCont.S("anpRef").String())
+	if anpRef != "{}" && anpRef != "" {
+		tokens := strings.Split(anpRef, "/")
+		d.Set("anp_name", tokens[len(tokens)-1])
+		d.Set("anp_schema_id", tokens[len(tokens)-5])
+		d.Set("anp_template_name", tokens[len(tokens)-3])
+	} else {
+		d.Set("anp_name", "")
+		d.Set("anp_schema_id", "")
+		d.Set("anp_template_name", "")
+	}
+
+	// Handle selectors for cloud type
+	epgType := d.Get("external_epg_type").(string)
+	if epgType == "cloud" {
+		selList := externalepgCont.S("selectors").Data().([]interface{})
+		if len(selList) > 0 {
+			selector := selList[0].(map[string]interface{})
+			d.Set("selector_name", selector["name"])
+			expList := selector["expressions"].([]interface{})
+			if len(expList) > 0 {
+				exp := expList[0].(map[string]interface{})
+				d.Set("selector_ip", exp["value"])
+			} else {
+				d.Set("selector_ip", "")
+			}
+		} else {
+			d.Set("selector_name", "")
+			d.Set("selector_ip", "")
+		}
+	} else {
+		d.Set("site_id", make([]interface{}, 0, 1))
+		d.Set("selector_name", "")
+		d.Set("selector_ip", "")
 	}
 
 	log.Printf("[DEBUG] %s: Import finished successfully", d.Id())
 	return []*schema.ResourceData{d}, nil
-
 }
 
 func resourceMSOTemplateExtenalepgCreate(d *schema.ResourceData, m interface{}) error {
@@ -449,118 +446,110 @@ func resourceMSOTemplateExtenalepgRead(d *schema.ResourceData, m interface{}) er
 	msoClient := m.(*client.Client)
 
 	schemaId := d.Get("schema_id").(string)
+	stateTemplate := d.Get("template_name").(string)
+	stateExternalepg := d.Get("external_epg_name").(string)
 
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	// Use the new specific external EPG endpoint
+	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s/templates/%s/externalEpgs/%s", schemaId, stateTemplate, stateExternalepg))
 	if err != nil {
 		return errorForObjectNotFound(err, d.Id(), cont, d)
 	}
-	count, err := cont.ArrayCount("templates")
-	if err != nil {
-		return fmt.Errorf("No Template found")
-	}
-	stateTemplate := d.Get("template_name").(string)
-	found := false
-	stateExternalepg := d.Get("external_epg_name")
-	for i := 0; i < count; i++ {
-		tempCont, err := cont.ArrayElement(i, "templates")
-		if err != nil {
-			return err
-		}
-		apiTemplate := models.StripQuotes(tempCont.S("name").String())
 
-		if apiTemplate == stateTemplate {
-			externalepgCount, err := tempCont.ArrayCount("externalEpgs")
-			if err != nil {
-				return fmt.Errorf("Unable to get Externalepg list")
-			}
-			for j := 0; j < externalepgCount; j++ {
-				externalepgCont, err := tempCont.ArrayElement(j, "externalEpgs")
-				if err != nil {
-					return err
-				}
-				apiExternalepg := models.StripQuotes(externalepgCont.S("name").String())
-				if apiExternalepg == stateExternalepg {
-					d.SetId(apiExternalepg)
-					d.Set("external_epg_name", apiExternalepg)
-					d.Set("uuid", models.StripQuotes(externalepgCont.S("uuid").String()))
-					d.Set("schema_id", schemaId)
-					d.Set("template_name", apiTemplate)
-					d.Set("display_name", models.StripQuotes(externalepgCont.S("displayName").String()))
-					d.Set("description", models.StripQuotes(externalepgCont.S("description").String()))
-					d.Set("external_epg_type", models.StripQuotes(externalepgCont.S("extEpgType").String()))
-					if externalepgCont.Exists("preferredGroup") {
-						d.Set("include_in_preferred_group", externalepgCont.S("preferredGroup").Data().(bool))
-					} else {
-						d.Set("include_in_preferred_group", false)
-					}
-
-					vrfRef := models.StripQuotes(externalepgCont.S("vrfRef").String())
-					re := regexp.MustCompile("/schemas/(.*)/templates/(.*)/vrfs/(.*)")
-					match := re.FindStringSubmatch(vrfRef)
-					d.Set("vrf_name", match[3])
-					d.Set("vrf_schema_id", match[1])
-					d.Set("vrf_template_name", match[2])
-					l3outRef := models.StripQuotes(externalepgCont.S("l3outRef").String())
-					if l3outRef != "{}" && l3outRef != "" {
-						reL3out := regexp.MustCompile("/schemas/(.*)/templates/(.*)/l3outs/(.*)")
-						matchL3out := reL3out.FindStringSubmatch(l3outRef)
-						d.Set("l3out_name", matchL3out[3])
-						d.Set("l3out_schema_id", matchL3out[1])
-						d.Set("l3out_template_name", matchL3out[2])
-					} else {
-						d.Set("l3out_name", "")
-						d.Set("l3out_schema_id", "")
-						d.Set("l3out_template_name", "")
-					}
-
-					anpRef := models.StripQuotes(externalepgCont.S("anpRef").String())
-					if anpRef != "{}" && anpRef != "" {
-						tokens := strings.Split(anpRef, "/")
-						d.Set("anp_name", tokens[len(tokens)-1])
-						d.Set("anp_schema_id", tokens[len(tokens)-5])
-						d.Set("anp_template_name", tokens[len(tokens)-3])
-					} else {
-						d.Set("anp_name", "")
-						d.Set("anp_schema_id", "")
-						d.Set("anp_template_name", "")
-					}
-
-					epgType := d.Get("external_epg_type").(string)
-					if epgType == "cloud" {
-						selList := externalepgCont.S("selectors").Data().([]interface{})
-						if len(selList) > 0 {
-							selector := selList[0].(map[string]interface{})
-							d.Set("selector_name", selector["name"])
-							expList := selector["expressions"].([]interface{})
-							if len(expList) > 0 {
-								exp := expList[0].(map[string]interface{})
-								d.Set("selector_ip", exp["value"])
-							} else {
-								d.Set("selector_ip", "")
-							}
-						} else {
-							d.Set("selector_name", "")
-							d.Set("selector_ip", "")
-						}
-					} else {
-						d.Set("site_id", make([]interface{}, 0, 1))
-						d.Set("selector_name", "")
-						d.Set("selector_ip", "")
-					}
-					found = true
-					break
-				}
-			}
-		}
+	// Check if the response contains the external EPG data wrapped in "externalEpg" object
+	if !cont.Exists("externalEpg") {
+		return fmt.Errorf("Unable to find external EPG data in response for EPG %s in Template %s of Schema Id %s", stateExternalepg, stateTemplate, schemaId)
 	}
 
-	if !found {
-		d.SetId("")
+	// Get the external EPG container directly from the "externalEpg" wrapper
+	externalepgCont := cont.S("externalEpg")
+
+	// Verify the external EPG name matches what we expect
+	apiExternalepg := models.StripQuotes(externalepgCont.S("name").String())
+	if apiExternalepg != stateExternalepg {
+		return fmt.Errorf("Expected external EPG name %s, but got %s", stateExternalepg, apiExternalepg)
+	}
+
+	// Set all the resource data attributes
+	d.SetId(apiExternalepg)
+	d.Set("external_epg_name", apiExternalepg)
+	d.Set("uuid", models.StripQuotes(externalepgCont.S("uuid").String()))
+	d.Set("schema_id", schemaId)
+	d.Set("template_name", stateTemplate)
+	d.Set("display_name", models.StripQuotes(externalepgCont.S("displayName").String()))
+	d.Set("description", models.StripQuotes(externalepgCont.S("description").String()))
+	d.Set("external_epg_type", models.StripQuotes(externalepgCont.S("extEpgType").String()))
+
+	if externalepgCont.Exists("preferredGroup") {
+		d.Set("include_in_preferred_group", externalepgCont.S("preferredGroup").Data().(bool))
+	} else {
+		d.Set("include_in_preferred_group", false)
+	}
+
+	// Handle VRF reference
+	vrfRef := models.StripQuotes(externalepgCont.S("vrfRef").String())
+	re := regexp.MustCompile("/schemas/(.*)/templates/(.*)/vrfs/(.*)")
+	match := re.FindStringSubmatch(vrfRef)
+	if len(match) == 4 {
+		d.Set("vrf_name", match[3])
+		d.Set("vrf_schema_id", match[1])
+		d.Set("vrf_template_name", match[2])
+	}
+
+	// Handle L3Out reference
+	l3outRef := models.StripQuotes(externalepgCont.S("l3outRef").String())
+	if l3outRef != "{}" && l3outRef != "" {
+		reL3out := regexp.MustCompile("/schemas/(.*)/templates/(.*)/l3outs/(.*)")
+		matchL3out := reL3out.FindStringSubmatch(l3outRef)
+		if len(matchL3out) == 4 {
+			d.Set("l3out_name", matchL3out[3])
+			d.Set("l3out_schema_id", matchL3out[1])
+			d.Set("l3out_template_name", matchL3out[2])
+		}
+	} else {
+		d.Set("l3out_name", "")
+		d.Set("l3out_schema_id", "")
+		d.Set("l3out_template_name", "")
+	}
+
+	// Handle ANP reference
+	anpRef := models.StripQuotes(externalepgCont.S("anpRef").String())
+	if anpRef != "{}" && anpRef != "" {
+		tokens := strings.Split(anpRef, "/")
+		d.Set("anp_name", tokens[len(tokens)-1])
+		d.Set("anp_schema_id", tokens[len(tokens)-5])
+		d.Set("anp_template_name", tokens[len(tokens)-3])
+	} else {
+		d.Set("anp_name", "")
+		d.Set("anp_schema_id", "")
+		d.Set("anp_template_name", "")
+	}
+
+	// Handle selectors for cloud type
+	epgType := d.Get("external_epg_type").(string)
+	if epgType == "cloud" {
+		selList := externalepgCont.S("selectors").Data().([]interface{})
+		if len(selList) > 0 {
+			selector := selList[0].(map[string]interface{})
+			d.Set("selector_name", selector["name"])
+			expList := selector["expressions"].([]interface{})
+			if len(expList) > 0 {
+				exp := expList[0].(map[string]interface{})
+				d.Set("selector_ip", exp["value"])
+			} else {
+				d.Set("selector_ip", "")
+			}
+		} else {
+			d.Set("selector_name", "")
+			d.Set("selector_ip", "")
+		}
+	} else {
+		d.Set("site_id", make([]interface{}, 0, 1))
+		d.Set("selector_name", "")
+		d.Set("selector_ip", "")
 	}
 
 	log.Printf("[DEBUG] %s: Read finished successfully", d.Id())
 	return nil
-
 }
 
 func resourceMSOTemplateExtenalepgUpdate(d *schema.ResourceData, m interface{}) error {

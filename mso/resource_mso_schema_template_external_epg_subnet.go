@@ -80,71 +80,53 @@ func resourceMSOTemplateExtenalepgSubnetImport(d *schema.ResourceData, m interfa
 	import_split := import_attribute.FindStringSubmatch(d.Id())
 	get_attribute := strings.Split(d.Id(), "/")
 	schemaId := get_attribute[0]
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
-	if err != nil {
-		return nil, err
-	}
-	count, err := cont.ArrayCount("templates")
-	if err != nil {
-		return nil, fmt.Errorf("No Template found")
-	}
 	stateTemplate := get_attribute[2]
-	found := false
 	stateExternalepg := get_attribute[4]
 	stateIP := import_split[2]
 
-	for i := 0; i < count; i++ {
-		tempCont, err := cont.ArrayElement(i, "templates")
+	// Use the new specific external EPG endpoint
+	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s/templates/%s/externalEpgs/%s", schemaId, stateTemplate, stateExternalepg))
+	if err != nil {
+		return nil, err
+	}
+
+	// Set basic resource attributes
+	d.Set("schema_id", schemaId)
+	d.Set("template_name", stateTemplate)
+	d.Set("external_epg_name", stateExternalepg)
+
+	// Check if the response contains the external EPG data wrapped in "externalEpg" object
+	if !cont.Exists("externalEpg") {
+		d.SetId("")
+		return []*schema.ResourceData{d}, fmt.Errorf("Unable to find external EPG data in response for EPG %s in Template %s of Schema Id %s", stateExternalepg, stateTemplate, schemaId)
+	}
+
+	// Get the external EPG container directly from the "externalEpg" wrapper
+	externalepgCont := cont.S("externalEpg")
+
+	found := false
+	// Look through the subnets in this external EPG
+	subnetCount, err := externalepgCont.ArrayCount("subnets")
+	if err != nil {
+		return []*schema.ResourceData{d}, fmt.Errorf("Unable to get subnets list")
+	}
+
+	for k := 0; k < subnetCount; k++ {
+		subnetsCont, err := externalepgCont.ArrayElement(k, "subnets")
 		if err != nil {
 			return nil, err
 		}
-		apiTemplate := models.StripQuotes(tempCont.S("name").String())
+		apiIP := models.StripQuotes(subnetsCont.S("ip").String())
+		if apiIP == stateIP {
+			ip := models.StripQuotes(subnetsCont.S("ip").String())
+			idSubnet := strings.Split(ip, "/")
+			d.SetId(idSubnet[0])
+			d.Set("ip", models.StripQuotes(subnetsCont.S("ip").String()))
+			d.Set("name", models.StripQuotes(subnetsCont.S("name").String()))
+			d.Set("scope", subnetsCont.S("scope").Data().([]interface{}))
+			d.Set("aggregate", subnetsCont.S("aggregate").Data().([]interface{}))
 
-		if apiTemplate == stateTemplate {
-			externalepgCount, err := tempCont.ArrayCount("externalEpgs")
-			if err != nil {
-				return nil, fmt.Errorf("Unable to get Externalepg list")
-			}
-			for j := 0; j < externalepgCount; j++ {
-				externalepgCont, err := tempCont.ArrayElement(j, "externalEpgs")
-				if err != nil {
-					return nil, err
-				}
-				apiExternalepg := models.StripQuotes(externalepgCont.S("name").String())
-				if apiExternalepg == stateExternalepg {
-					subnetCount, err := externalepgCont.ArrayCount("subnets")
-					if err != nil {
-						return nil, fmt.Errorf("Unable to get subnets list")
-					}
-					for k := 0; k < subnetCount; k++ {
-						subnetsCont, err := externalepgCont.ArrayElement(k, "subnets")
-						if err != nil {
-							return nil, err
-						}
-						apiIP := models.StripQuotes(subnetsCont.S("ip").String())
-						if apiIP == stateIP {
-							d.Set("schema_id", schemaId)
-							d.Set("template_name", apiTemplate)
-							d.Set("external_epg_name", apiExternalepg)
-							ip := models.StripQuotes(subnetsCont.S("ip").String())
-							idSubnet := strings.Split(ip, "/")
-							d.SetId(idSubnet[0])
-							d.Set("ip", models.StripQuotes(subnetsCont.S("ip").String()))
-							d.Set("name", models.StripQuotes(subnetsCont.S("name").String()))
-							d.Set("scope", subnetsCont.S("scope").Data().([]interface{}))
-							d.Set("aggregate", subnetsCont.S("aggregate").Data().([]interface{}))
-
-							found = true
-							break
-						}
-					}
-				}
-				if found {
-					break
-				}
-			}
-		}
-		if found {
+			found = true
 			break
 		}
 	}
@@ -156,7 +138,6 @@ func resourceMSOTemplateExtenalepgSubnetImport(d *schema.ResourceData, m interfa
 
 	log.Printf("[DEBUG] %s: Import finished successfully", d.Id())
 	return []*schema.ResourceData{d}, nil
-
 }
 
 func resourceMSOTemplateExtenalepgSubnetCreate(d *schema.ResourceData, m interface{}) error {
@@ -201,73 +182,51 @@ func resourceMSOTemplateExtenalepgSubnetRead(d *schema.ResourceData, m interface
 	msoClient := m.(*client.Client)
 
 	schemaId := d.Get("schema_id").(string)
+	stateTemplate := d.Get("template_name").(string)
+	stateExternalepg := d.Get("external_epg_name").(string)
+	stateIP := d.Get("ip").(string)
 
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	// Use the new specific external EPG endpoint
+	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s/templates/%s/externalEpgs/%s", schemaId, stateTemplate, stateExternalepg))
 	if err != nil {
 		return errorForObjectNotFound(err, d.Id(), cont, d)
 	}
-	count, err := cont.ArrayCount("templates")
-	if err != nil {
-		return fmt.Errorf("No Template found")
-	}
-	stateTemplate := d.Get("template_name").(string)
-	found := false
-	stateExternalepg := d.Get("external_epg_name")
-	stateIP := d.Get("ip")
 
-	for i := 0; i < count; i++ {
-		tempCont, err := cont.ArrayElement(i, "templates")
+	// Check if the response contains the external EPG data wrapped in "externalEpg" object
+	if !cont.Exists("externalEpg") {
+		return fmt.Errorf("Unable to find external EPG data in response for EPG %s in Template %s of Schema Id %s", stateExternalepg, stateTemplate, schemaId)
+	}
+
+	// Get the external EPG container directly from the "externalEpg" wrapper
+	externalepgCont := cont.S("externalEpg")
+
+	found := false
+	// Look through the subnets in this external EPG
+	subnetCount, err := externalepgCont.ArrayCount("subnets")
+	if err != nil {
+		return fmt.Errorf("Unable to get subnets list")
+	}
+
+	for k := 0; k < subnetCount; k++ {
+		subnetsCont, err := externalepgCont.ArrayElement(k, "subnets")
 		if err != nil {
 			return err
 		}
-		apiTemplate := models.StripQuotes(tempCont.S("name").String())
-
-		if apiTemplate == stateTemplate {
-			externalepgCount, err := tempCont.ArrayCount("externalEpgs")
-			if err != nil {
-				return fmt.Errorf("Unable to get Externalepg list")
+		apiIP := models.StripQuotes(subnetsCont.S("ip").String())
+		if apiIP == stateIP {
+			d.Set("schema_id", schemaId)
+			d.Set("template_name", stateTemplate)
+			d.Set("external_epg_name", stateExternalepg)
+			d.SetId(apiIP)
+			d.Set("ip", models.StripQuotes(subnetsCont.S("ip").String()))
+			if name := models.StripQuotes(subnetsCont.S("name").String()); name == "{}" {
+				d.Set("name", "")
+			} else {
+				d.Set("name", name)
 			}
-			for j := 0; j < externalepgCount; j++ {
-				externalepgCont, err := tempCont.ArrayElement(j, "externalEpgs")
-				if err != nil {
-					return err
-				}
-				apiExternalepg := models.StripQuotes(externalepgCont.S("name").String())
-				if apiExternalepg == stateExternalepg {
-					subnetCount, err := externalepgCont.ArrayCount("subnets")
-					if err != nil {
-						return fmt.Errorf("Unable to get subnets list")
-					}
-					for k := 0; k < subnetCount; k++ {
-						subnetsCont, err := externalepgCont.ArrayElement(k, "subnets")
-						if err != nil {
-							return err
-						}
-						apiIP := models.StripQuotes(subnetsCont.S("ip").String())
-						if apiIP == stateIP {
-							d.Set("schema_id", schemaId)
-							d.Set("template_name", apiTemplate)
-							d.Set("external_epg_name", apiExternalepg)
-							d.SetId(apiIP)
-							d.Set("ip", models.StripQuotes(subnetsCont.S("ip").String()))
-							if name := models.StripQuotes(subnetsCont.S("name").String()); name == "{}" {
-								d.Set("name", "")
-							} else {
-								d.Set("name", name)
-							}
-							d.Set("scope", subnetsCont.S("scope").Data().([]interface{}))
-							d.Set("aggregate", subnetsCont.S("aggregate").Data().([]interface{}))
-							found = true
-							break
-						}
-					}
-				}
-				if found {
-					break
-				}
-			}
-		}
-		if found {
+			d.Set("scope", subnetsCont.S("scope").Data().([]interface{}))
+			d.Set("aggregate", subnetsCont.S("aggregate").Data().([]interface{}))
+			found = true
 			break
 		}
 	}
@@ -280,7 +239,6 @@ func resourceMSOTemplateExtenalepgSubnetRead(d *schema.ResourceData, m interface
 
 	log.Printf("[DEBUG] %s: Read finished successfully", d.Id())
 	return nil
-
 }
 
 func resourceMSOTemplateExtenalepgSubnetUpdate(d *schema.ResourceData, m interface{}) error {

@@ -179,138 +179,114 @@ func resourceMSOSchemaTemplateAnpEpg() *schema.Resource {
 }
 
 func resourceMSOSchemaTemplateAnpEpgSetAttr(schemaId, stateTemplate, stateANP, stateEPG string, cont *container.Container, d *schema.ResourceData) error {
-	found := false
-	count, err := cont.ArrayCount("templates")
-	if err != nil {
-		return fmt.Errorf("No Template found")
+	// Check if the response contains the EPG data wrapped in "epg" object
+	if !cont.Exists("epg") {
+		return fmt.Errorf("Unable to find EPG data in response for EPG %s in ANP %s, Template %s of Schema Id %s", stateEPG, stateANP, stateTemplate, schemaId)
 	}
-	for i := 0; i < count; i++ {
-		tempCont, err := cont.ArrayElement(i, "templates")
-		if err != nil {
-			return err
-		}
-		apiTemplate := models.StripQuotes(tempCont.S("name").String())
 
-		if apiTemplate == stateTemplate {
-			d.Set("template_name", apiTemplate)
-			anpCount, err := tempCont.ArrayCount("anps")
-			if err != nil {
-				return fmt.Errorf("Unable to get ANP list")
-			}
-			for j := 0; j < anpCount; j++ {
-				anpCont, err := tempCont.ArrayElement(j, "anps")
-				if err != nil {
-					return err
-				}
-				apiANP := models.StripQuotes(anpCont.S("name").String())
-				if apiANP == stateANP {
-					d.Set("anp_name", apiANP)
-					epgCount, err := anpCont.ArrayCount("epgs")
-					if err != nil {
-						return fmt.Errorf("Unable to get EPG list")
-					}
-					for k := 0; k < epgCount; k++ {
-						epgCont, err := anpCont.ArrayElement(k, "epgs")
-						if err != nil {
-							return err
-						}
-						apiEPG := models.StripQuotes(epgCont.S("name").String())
-						if apiEPG == stateEPG {
-							d.SetId(fmt.Sprintf("%s/templates/%s/anps/%s/epgs/%s", schemaId, stateTemplate, stateANP, stateEPG))
-							d.Set("name", apiEPG)
-							d.Set("uuid", models.StripQuotes(epgCont.S("uuid").String()))
-							d.Set("display_name", models.StripQuotes(epgCont.S("displayName").String()))
-							d.Set("description", models.StripQuotes(epgCont.S("description").String()))
-							d.Set("intra_epg", models.StripQuotes(epgCont.S("intraEpg").String()))
-							d.Set("useg_epg", epgCont.S("uSegEpg").Data().(bool))
-							if epgCont.Exists("mCastSource") {
-								d.Set("intersite_multicast_source", epgCont.S("mCastSource").Data().(bool))
-							}
-							if epgCont.Exists("proxyArp") {
-								d.Set("proxy_arp", epgCont.S("proxyArp").Data().(bool))
-							}
-							d.Set("preferred_group", epgCont.S("preferredGroup").Data().(bool))
-							d.Set("epg_type", models.StripQuotes(epgCont.S("epgType").String()))
+	// Get the EPG container directly from the "epg" wrapper
+	epgCont := cont.S("epg")
 
-							servicesCont := epgCont.S("cloudServiceEpgConfig")
-
-							if models.StripQuotes(servicesCont.S("accessType").String()) == "Private" {
-								d.Set("access_type", "private")
-							} else if models.StripQuotes(servicesCont.S("accessType").String()) == "Public" {
-								d.Set("access_type", "public")
-							} else if models.StripQuotes(servicesCont.S("accessType").String()) == "PublicAndPrivate" {
-								d.Set("access_type", "public_and_private")
-							}
-
-							if models.StripQuotes(servicesCont.S("deploymentType").String()) == "CloudNative" {
-								d.Set("deployment_type", "cloud_native")
-							} else if models.StripQuotes(servicesCont.S("deploymentType").String()) == "CloudNativeManaged" {
-								d.Set("deployment_type", "cloud_native_managed")
-							} else if models.StripQuotes(servicesCont.S("deploymentType").String()) == "Third-party" {
-								d.Set("deployment_type", "third_party")
-							}
-
-							if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-ApiManagement" {
-								d.Set("service_type", "azure_api_management_services")
-							} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-CosmosDB" {
-								d.Set("service_type", "azure_cosmos_db")
-							} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-Databricks" {
-								d.Set("service_type", "azure_databricks")
-							} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-SqlServer" {
-								d.Set("service_type", "azure_sql")
-							} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-Storage" {
-								d.Set("service_type", "azure_storage")
-							} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-StorageBlob" {
-								d.Set("service_type", "azure_storage_blob")
-							} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-StorageFile" {
-								d.Set("service_type", "azure_storage_file")
-							} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-StorageQueue" {
-								d.Set("service_type", "azure_storage_queue")
-							} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-StorageTable" {
-								d.Set("service_type", "azure_storage_table")
-							} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-AksCluster" {
-								d.Set("service_type", "azure_kubernetes_services")
-							} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-ADDS" {
-								d.Set("service_type", "azure_ad_domain_services")
-							} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-ContainerRegistry" {
-								d.Set("service_type", "azure_contain_registry")
-							} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-KeyVault" {
-								d.Set("service_type", "azure_key_vault")
-							} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-Redis" {
-								d.Set("service_type", "redis_cache")
-							} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Custom" {
-								d.Set("service_type", "custom")
-								d.Set("custom_service_type", models.StripQuotes(servicesCont.S("customSvcType").String()))
-							}
-
-							vrfRef := models.StripQuotes(epgCont.S("vrfRef").String())
-							re_vrf := regexp.MustCompile("/schemas/(.*)/templates/(.*)/vrfs/(.*)")
-							match_vrf := re_vrf.FindStringSubmatch(vrfRef)
-							if len(match_vrf) == 4 {
-								d.Set("vrf_name", match_vrf[3])
-								d.Set("vrf_schema_id", match_vrf[1])
-								d.Set("vrf_template_name", match_vrf[2])
-							}
-
-							bdRef := models.StripQuotes(epgCont.S("bdRef").String())
-							re_bd := regexp.MustCompile("/schemas/(.*)/templates/(.*)/bds/(.*)")
-							match_bd := re_bd.FindStringSubmatch(bdRef)
-							if len(match_bd) == 4 {
-								d.Set("bd_name", match_bd[3])
-								d.Set("bd_schema_id", match_bd[1])
-								d.Set("bd_template_name", match_bd[2])
-							}
-							found = true
-							break
-						}
-					}
-				}
-			}
-		}
+	// Verify the EPG name matches what we expect
+	apiEPG := models.StripQuotes(epgCont.S("name").String())
+	if apiEPG != stateEPG {
+		return fmt.Errorf("Expected EPG name %s, but got %s", stateEPG, apiEPG)
 	}
-	if !found {
-		return fmt.Errorf("Unable to find the ANP EPG %s in Template %s of Schema Id %s ", stateEPG, stateTemplate, schemaId)
+
+	// Set the resource ID and basic attributes
+	d.SetId(fmt.Sprintf("%s/templates/%s/anps/%s/epgs/%s", schemaId, stateTemplate, stateANP, stateEPG))
+	d.Set("template_name", stateTemplate)
+	d.Set("anp_name", stateANP)
+	d.Set("name", apiEPG)
+	d.Set("uuid", models.StripQuotes(epgCont.S("uuid").String()))
+	d.Set("display_name", models.StripQuotes(epgCont.S("displayName").String()))
+	d.Set("description", models.StripQuotes(epgCont.S("description").String()))
+	d.Set("intra_epg", models.StripQuotes(epgCont.S("intraEpg").String()))
+	d.Set("useg_epg", epgCont.S("uSegEpg").Data().(bool))
+
+	// Handle optional boolean fields that might not exist
+	if epgCont.Exists("mCastSource") {
+		d.Set("intersite_multicast_source", epgCont.S("mCastSource").Data().(bool))
 	}
+	if epgCont.Exists("proxyArp") {
+		d.Set("proxy_arp", epgCont.S("proxyArp").Data().(bool))
+	}
+
+	d.Set("preferred_group", epgCont.S("preferredGroup").Data().(bool))
+	d.Set("epg_type", models.StripQuotes(epgCont.S("epgType").String()))
+
+	// Handle cloud service EPG configuration
+	servicesCont := epgCont.S("cloudServiceEpgConfig")
+
+	if models.StripQuotes(servicesCont.S("accessType").String()) == "Private" {
+		d.Set("access_type", "private")
+	} else if models.StripQuotes(servicesCont.S("accessType").String()) == "Public" {
+		d.Set("access_type", "public")
+	} else if models.StripQuotes(servicesCont.S("accessType").String()) == "PublicAndPrivate" {
+		d.Set("access_type", "public_and_private")
+	}
+
+	if models.StripQuotes(servicesCont.S("deploymentType").String()) == "CloudNative" {
+		d.Set("deployment_type", "cloud_native")
+	} else if models.StripQuotes(servicesCont.S("deploymentType").String()) == "CloudNativeManaged" {
+		d.Set("deployment_type", "cloud_native_managed")
+	} else if models.StripQuotes(servicesCont.S("deploymentType").String()) == "Third-party" {
+		d.Set("deployment_type", "third_party")
+	}
+
+	if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-ApiManagement" {
+		d.Set("service_type", "azure_api_management_services")
+	} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-CosmosDB" {
+		d.Set("service_type", "azure_cosmos_db")
+	} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-Databricks" {
+		d.Set("service_type", "azure_databricks")
+	} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-SqlServer" {
+		d.Set("service_type", "azure_sql")
+	} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-Storage" {
+		d.Set("service_type", "azure_storage")
+	} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-StorageBlob" {
+		d.Set("service_type", "azure_storage_blob")
+	} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-StorageFile" {
+		d.Set("service_type", "azure_storage_file")
+	} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-StorageQueue" {
+		d.Set("service_type", "azure_storage_queue")
+	} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-StorageTable" {
+		d.Set("service_type", "azure_storage_table")
+	} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-AksCluster" {
+		d.Set("service_type", "azure_kubernetes_services")
+	} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-ADDS" {
+		d.Set("service_type", "azure_ad_domain_services")
+	} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-ContainerRegistry" {
+		d.Set("service_type", "azure_contain_registry")
+	} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-KeyVault" {
+		d.Set("service_type", "azure_key_vault")
+	} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Azure-Redis" {
+		d.Set("service_type", "redis_cache")
+	} else if models.StripQuotes(servicesCont.S("serviceType").String()) == "Custom" {
+		d.Set("service_type", "custom")
+		d.Set("custom_service_type", models.StripQuotes(servicesCont.S("customSvcType").String()))
+	}
+
+	// Handle VRF reference
+	vrfRef := models.StripQuotes(epgCont.S("vrfRef").String())
+	re_vrf := regexp.MustCompile("/schemas/(.*)/templates/(.*)/vrfs/(.*)")
+	match_vrf := re_vrf.FindStringSubmatch(vrfRef)
+	if len(match_vrf) == 4 {
+		d.Set("vrf_name", match_vrf[3])
+		d.Set("vrf_schema_id", match_vrf[1])
+		d.Set("vrf_template_name", match_vrf[2])
+	}
+
+	// Handle BD reference
+	bdRef := models.StripQuotes(epgCont.S("bdRef").String())
+	re_bd := regexp.MustCompile("/schemas/(.*)/templates/(.*)/bds/(.*)")
+	match_bd := re_bd.FindStringSubmatch(bdRef)
+	if len(match_bd) == 4 {
+		d.Set("bd_name", match_bd[3])
+		d.Set("bd_schema_id", match_bd[1])
+		d.Set("bd_template_name", match_bd[2])
+	}
+
 	return nil
 }
 
@@ -495,17 +471,21 @@ func resourceMSOSchemaTemplateAnpEpgRead(d *schema.ResourceData, m interface{}) 
 	msoClient := m.(*client.Client)
 
 	schemaId := d.Get("schema_id").(string)
+	templateName := d.Get("template_name").(string)
+	anpName := d.Get("anp_name").(string)
+	epgName := d.Get("name").(string)
 
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	/*	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId)) */
+	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s/templates/%s/anps/%s/epgs/%s", schemaId, templateName, anpName, epgName))
 	if err != nil {
 		return errorForObjectNotFound(err, d.Id(), cont, d)
 	}
 
-	stateTemplate := d.Get("template_name").(string)
+	/*stateTemplate := d.Get("template_name").(string)
 	stateANP := d.Get("anp_name").(string)
-	stateEPG := d.Get("name").(string)
+	stateEPG := d.Get("name").(string) */
 
-	err = resourceMSOSchemaTemplateAnpEpgSetAttr(schemaId, stateTemplate, stateANP, stateEPG, cont, d)
+	err = resourceMSOSchemaTemplateAnpEpgSetAttr(schemaId, templateName, anpName, epgName, cont, d)
 
 	if err != nil {
 		d.SetId("")
