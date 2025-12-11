@@ -125,7 +125,7 @@ func resourceMSOSchemaTemplateFilterEntryImport(d *schema.ResourceData, m interf
 	msoClient := m.(*client.Client)
 	get_attribute := strings.Split(d.Id(), "/")
 	schemaId := get_attribute[0]
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	cont, err := msoClient.GetSchemaWithCache(schemaId)
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +295,7 @@ func resourceMSOSchemaTemplateFilterEntryCreate(d *schema.ResourceData, m interf
 	entries = append(entries, entryMap)
 	foundEntry := false
 	foundFilter := false
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	cont, err := msoClient.GetSchemaWithCache(schemaId)
 	if err != nil {
 		return err
 	}
@@ -354,6 +354,8 @@ func resourceMSOSchemaTemplateFilterEntryCreate(d *schema.ResourceData, m interf
 						if err != nil {
 							return err
 						}
+						// Invalidate schema cache after modification
+						msoClient.InvalidateSchemaCache(schemaId)
 					}
 				}
 			}
@@ -366,6 +368,8 @@ func resourceMSOSchemaTemplateFilterEntryCreate(d *schema.ResourceData, m interf
 		if err != nil {
 			return err
 		}
+		// Invalidate schema cache after modification
+		msoClient.InvalidateSchemaCache(schemaId)
 	}
 	return resourceMSOSchemaTemplateFilterEntryRead(d, m)
 }
@@ -377,7 +381,7 @@ func resourceMSOSchemaTemplateFilterEntryRead(d *schema.ResourceData, m interfac
 
 	schemaId := d.Get("schema_id").(string)
 
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	cont, err := msoClient.GetSchemaWithCache(schemaId)
 	if err != nil {
 		return errorForObjectNotFound(err, d.Id(), cont, d)
 	}
@@ -532,6 +536,8 @@ func resourceMSOSchemaTemplateFilterEntryUpdate(d *schema.ResourceData, m interf
 	if err != nil {
 		return err
 	}
+	// Invalidate schema cache after modification
+	msoClient.InvalidateSchemaCache(schemaId)
 	return resourceMSOSchemaTemplateFilterEntryRead(d, m)
 }
 
@@ -600,7 +606,7 @@ func resourceMSOSchemaTemplateFilterEntryDelete(d *schema.ResourceData, m interf
 		entryMap["tcpSessionRules"] = tcpSessionRules
 	}
 	entries = append(entries, entryMap)
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	cont, err := msoClient.GetSchemaWithCache(schemaId)
 	if err != nil {
 		return err
 	}
@@ -646,6 +652,8 @@ func resourceMSOSchemaTemplateFilterEntryDelete(d *schema.ResourceData, m interf
 						if err != nil && !(response.Exists("code") && response.S("code").String() == "141") {
 							return err
 						}
+						// Invalidate schema cache after modification
+						msoClient.InvalidateSchemaCache(schemaId)
 					} else {
 						pathf := fmt.Sprintf("/templates/%s/filters/%s/entries/%s", stateTemplate, filterName, entryName)
 						filterStruct := models.NewTemplateFilterEntry("remove", pathf, entryName, entryDisplayName, entryDescription, etherType, arpFlag, ipProtocol, sourceFrom, sourceTo, destinationFrom, destinationTo, matchOnlyFragments, stateful, tcpSessionRules)
@@ -655,6 +663,8 @@ func resourceMSOSchemaTemplateFilterEntryDelete(d *schema.ResourceData, m interf
 						if err != nil && !(response.Exists("code") && response.S("code").String() == "141") {
 							return err
 						}
+						// Invalidate schema cache after modification
+						msoClient.InvalidateSchemaCache(schemaId)
 					}
 				}
 			}

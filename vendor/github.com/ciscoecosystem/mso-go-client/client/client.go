@@ -57,6 +57,7 @@ type Client struct {
 	backoffMinDelay    int
 	backoffMaxDelay    int
 	backoffDelayFactor float64
+	Cache              *ThreadSafeCache
 }
 
 type CallbackRetryFunc func(*container.Container) bool
@@ -150,6 +151,7 @@ func initClient(clientUrl, username string, options ...Option) *Client {
 		username:         username,
 		httpClient:       http.DefaultClient,
 		maxReAuthRetries: 3,
+		Cache:            NewThreadSafeCache(),
 	}
 
 	for _, option := range options {
@@ -377,6 +379,44 @@ func (c *Client) GetVersion() (string, error) {
 	return version, nil
 }
 
+// GetSchemaWithCache retrieves schema with caching support
+func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, error) {
+	cacheKey := fmt.Sprintf("schema_%s", schemaId)
+
+	// Check cache first
+	if cached, found := c.Cache.Get(cacheKey); found {
+		log.Printf("[DEBUG] Schema cache hit for %s", schemaId)
+		return cached.(*container.Container), nil
+	}
+
+	log.Printf("[DEBUG] Schema cache miss for %s, fetching from API", schemaId)
+
+	// Cache miss - fetch from API
+	cont, err := c.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	if err != nil {
+		return nil, err
+	}
+
+	// Store in cache
+	c.Cache.Set(cacheKey, cont)
+	log.Printf("[DEBUG] Cached schema %s", schemaId)
+
+	return cont, nil
+}
+
+// InvalidateSchemaCache removes a schema from cache
+func (c *Client) InvalidateSchemaCache(schemaId string) {
+	cacheKey := fmt.Sprintf("schema_%s", schemaId)
+	c.Cache.Delete(cacheKey)
+	log.Printf("[DEBUG] Invalidated schema cache for %s", schemaId)
+}
+
+// InvalidateAllSchemaCache removes all schema caches (for safety)
+func (c *Client) InvalidateAllSchemaCache() {
+	c.Cache.DeletePattern("schema_")
+	log.Printf("[DEBUG] Invalidated all schema caches")
+}
+
 // Compares the version to the retrieved version.
 // This returns -1, 0, or 1 if this version is smaller, equal, or larger than the retrieved version, respectively.
 func (c *Client) CompareVersion(v string) (int, error) {
@@ -593,4 +633,49 @@ func stripQuotes(word string) string {
 		return strings.TrimSuffix(strings.TrimPrefix(word, "\""), "\"")
 	}
 	return word
+}
+
+type ThreadSafeCache struct {
+	mu    sync.RWMutex
+	items map[string]interface{}
+}
+
+// NewThreadSafeCache creates and returns a new initialized ThreadSafeCache.
+func NewThreadSafeCache() *ThreadSafeCache {
+	return &ThreadSafeCache{
+		items: make(map[string]interface{}),
+	}
+}
+
+// Set adds or updates an item in the cache.
+func (c *ThreadSafeCache) Set(key string, value interface{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.items[key] = value
+}
+
+// Get retrieves an item from the cache.
+func (c *ThreadSafeCache) Get(key string) (interface{}, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	item, found := c.items[key]
+	return item, found
+}
+
+// Delete removes an item from the cache.
+func (c *ThreadSafeCache) Delete(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.items, key)
+}
+
+// DeletePattern removes all items from the cache matching the pattern.
+func (c *ThreadSafeCache) DeletePattern(pattern string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key := range c.items {
+		if strings.Contains(key, pattern) {
+			delete(c.items, key)
+		}
+	}
 }
