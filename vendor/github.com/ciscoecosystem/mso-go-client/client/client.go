@@ -385,11 +385,15 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 
 	// Check cache first
 	if cached, found := c.Cache.Get(cacheKey); found {
-		log.Printf("[DEBUG] Schema cache hit for %s", schemaId)
+		hits, misses, invalidations, hitRatio := c.Cache.GetStats()
+		log.Printf("[INFO] SCHEMA_CACHE_HIT for %s | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
+			schemaId, hits, misses, invalidations, hitRatio)
 		return cached.(*container.Container), nil
 	}
 
-	log.Printf("[DEBUG] Schema cache miss for %s, fetching from API", schemaId)
+	hits, misses, invalidations, hitRatio := c.Cache.GetStats()
+	log.Printf("[INFO] SCHEMA_CACHE_MISS for %s, fetching from API | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
+		schemaId, hits, misses, invalidations, hitRatio)
 
 	// Cache miss - fetch from API
 	cont, err := c.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
@@ -399,7 +403,7 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 
 	// Store in cache
 	c.Cache.Set(cacheKey, cont)
-	log.Printf("[DEBUG] Cached schema %s", schemaId)
+	log.Printf("[INFO] SCHEMA_CACHED for %s | Size: %d items in cache", schemaId, len(c.Cache.items))
 
 	return cont, nil
 }
@@ -408,13 +412,29 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 func (c *Client) InvalidateSchemaCache(schemaId string) {
 	cacheKey := fmt.Sprintf("schema_%s", schemaId)
 	c.Cache.Delete(cacheKey)
-	log.Printf("[DEBUG] Invalidated schema cache for %s", schemaId)
+	hits, misses, invalidations, hitRatio := c.Cache.GetStats()
+	log.Printf("[INFO] SCHEMA_CACHE_INVALIDATED for %s | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
+		schemaId, hits, misses, invalidations, hitRatio)
 }
 
 // InvalidateAllSchemaCache removes all schema caches (for safety)
 func (c *Client) InvalidateAllSchemaCache() {
 	c.Cache.DeletePattern("schema_")
-	log.Printf("[DEBUG] Invalidated all schema caches")
+	hits, misses, invalidations, hitRatio := c.Cache.GetStats()
+	log.Printf("[INFO] SCHEMA_CACHE_ALL_INVALIDATED | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
+		hits, misses, invalidations, hitRatio)
+}
+
+// GetCacheStats returns current cache statistics
+func (c *Client) GetCacheStats() (hits, misses, invalidations int64, hitRatio float64) {
+	return c.Cache.GetStats()
+}
+
+// LogCacheStats logs current cache statistics
+func (c *Client) LogCacheStats() {
+	hits, misses, invalidations, hitRatio := c.Cache.GetStats()
+	log.Printf("[INFO] SCHEMA_CACHE_STATS | Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%, Size=%d",
+		hits, misses, invalidations, hitRatio, len(c.Cache.items))
 }
 
 // Compares the version to the retrieved version.
@@ -636,8 +656,11 @@ func stripQuotes(word string) string {
 }
 
 type ThreadSafeCache struct {
-	mu    sync.RWMutex
-	items map[string]interface{}
+	mu       sync.RWMutex
+	items    map[string]interface{}
+	hits     int64
+	misses   int64
+	invalidations int64
 }
 
 // NewThreadSafeCache creates and returns a new initialized ThreadSafeCache.
@@ -656,9 +679,14 @@ func (c *ThreadSafeCache) Set(key string, value interface{}) {
 
 // Get retrieves an item from the cache.
 func (c *ThreadSafeCache) Get(key string) (interface{}, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	item, found := c.items[key]
+	if found {
+		c.hits++
+	} else {
+		c.misses++
+	}
 	return item, found
 }
 
@@ -667,15 +695,33 @@ func (c *ThreadSafeCache) Delete(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.items, key)
+	c.invalidations++
 }
 
 // DeletePattern removes all items from the cache matching the pattern.
 func (c *ThreadSafeCache) DeletePattern(pattern string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	deletedCount := 0
 	for key := range c.items {
 		if strings.Contains(key, pattern) {
 			delete(c.items, key)
+			deletedCount++
 		}
 	}
+	c.invalidations += int64(deletedCount)
+}
+
+// GetStats returns cache statistics.
+func (c *ThreadSafeCache) GetStats() (hits, misses, invalidations int64, hitRatio float64) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	hits = c.hits
+	misses = c.misses
+	invalidations = c.invalidations
+	total := hits + misses
+	if total > 0 {
+		hitRatio = float64(hits) / float64(total) * 100
+	}
+	return
 }
