@@ -421,19 +421,18 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 
 	cacheKey := fmt.Sprintf("schema_%s", schemaId)
 
-	// Check cache first - use atomic get+clone to prevent race conditions
+	// Check cache first - use atomic get+clone
 	cloneFunc := func(item interface{}) (interface{}, error) {
 		return c.deepCloneContainer(item.(*container.Container))
 	}
 
-	if cached, found, cloneErr := c.Cache.GetContainerClone(cacheKey, cloneFunc); found {
+	if cached, found, cloneErr := c.Cache.Get(cacheKey, cloneFunc); found {
 		hits, misses, invalidations, hitRatio := c.Cache.GetStats()
 		log.Printf("[DEBUG] SCHEMA_CACHE_HIT for %s | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
 			schemaId, hits, misses, invalidations, hitRatio)
 
 		if cloneErr != nil {
 			log.Printf("[WARN] Failed to clone cached container for %s, fetching fresh: %v", schemaId, cloneErr)
-			// Fallback to fresh API call on clone failure
 			return c.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 		}
 		return cached.(*container.Container), nil
@@ -743,43 +742,21 @@ func (c *ThreadSafeCache) Set(key string, value interface{}) {
 	c.items[key] = value
 }
 
-// Get retrieves an item from the cache.
-func (c *ThreadSafeCache) Get(key string) (interface{}, bool) {
-	// First, get the item with read lock (allows concurrent reads)
+// Get atomically gets and clones an item to prevent race conditions
+func (c *ThreadSafeCache) Get(key string, cloneFunc func(interface{}) (interface{}, error)) (interface{}, bool, error) {
 	c.mu.RLock()
 	item, found := c.items[key]
-	c.mu.RUnlock()
 
-	// Then update statistics with write lock (brief, atomic)
-	c.mu.Lock()
-	if found {
-		c.hits++
-	} else {
-		c.misses++
-	}
-	c.mu.Unlock()
-
-	return item, found
-}
-
-// GetContainerClone retrieves an item from cache and returns a deep clone atomically
-// This prevents race conditions between cache access and cloning
-func (c *ThreadSafeCache) GetContainerClone(key string, cloneFunc func(interface{}) (interface{}, error)) (interface{}, bool, error) {
-	// Get the item with read lock and clone while lock is held
-	c.mu.RLock()
-	item, found := c.items[key]
-	var cloned interface{}
+	var result interface{}
 	var cloneErr error
 
-	if found && cloneFunc != nil {
-		// Clone while still holding the read lock - prevents race conditions
-		cloned, cloneErr = cloneFunc(item)
-	} else if found {
-		cloned = item // No cloning requested
+	if found {
+		// Clone while holding read lock - prevents race conditions
+		result, cloneErr = cloneFunc(item)
 	}
 	c.mu.RUnlock()
 
-	// Update statistics with write lock (brief, atomic)
+	// Update statistics
 	c.mu.Lock()
 	if found {
 		c.hits++
@@ -788,12 +765,9 @@ func (c *ThreadSafeCache) GetContainerClone(key string, cloneFunc func(interface
 	}
 	c.mu.Unlock()
 
-	if found && cloneErr != nil {
-		return nil, found, cloneErr
-	}
-
-	return cloned, found, nil
+	return result, found, cloneErr
 }
+
 
 // Delete removes an item from the cache.
 func (c *ThreadSafeCache) Delete(key string) {
