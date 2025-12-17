@@ -415,7 +415,7 @@ func (c *Client) deepCloneContainer(original *container.Container) (*container.C
 func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, error) {
 	// Skip cache if disabled - fall back to direct API call
 	if !c.cacheEnabled {
-		log.Printf("[INFO] SCHEMA_CACHE_DISABLED for %s, fetching from API", schemaId)
+		log.Printf("[DEBUG] SCHEMA_CACHE_DISABLED for %s, fetching from API", schemaId)
 		return c.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	}
 
@@ -424,7 +424,7 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 	// Check cache first
 	if cached, found := c.Cache.Get(cacheKey); found {
 		hits, misses, invalidations, hitRatio := c.Cache.GetStats()
-		log.Printf("[INFO] SCHEMA_CACHE_HIT for %s | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
+		log.Printf("[DEBUG] SCHEMA_CACHE_HIT for %s | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
 			schemaId, hits, misses, invalidations, hitRatio)
 
 		// CRITICAL: Return deep clone to prevent data races
@@ -438,7 +438,7 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 	}
 
 	hits, misses, invalidations, hitRatio := c.Cache.GetStats()
-	log.Printf("[INFO] SCHEMA_CACHE_MISS for %s, fetching from API | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
+	log.Printf("[DEBUG] SCHEMA_CACHE_MISS for %s, fetching from API | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
 		schemaId, hits, misses, invalidations, hitRatio)
 
 	// Cache miss - fetch from API
@@ -449,7 +449,7 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 
 	// Store in cache
 	c.Cache.Set(cacheKey, cont)
-	log.Printf("[INFO] SCHEMA_CACHED for %s | Size: %d items in cache", schemaId, len(c.Cache.items))
+	log.Printf("[DEBUG] SCHEMA_CACHED for %s | Size: %d items in cache", schemaId, len(c.Cache.items))
 
 	// CRITICAL: Return deep clone even for fresh data to maintain consistency
 	cloned, err := c.deepCloneContainer(cont)
@@ -464,14 +464,14 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 func (c *Client) InvalidateSchemaCache(schemaId string) {
 	// Skip cache operations if caching is disabled
 	if !c.cacheEnabled {
-		log.Printf("[INFO] SCHEMA_CACHE_DISABLED, skipping invalidation for %s", schemaId)
+		log.Printf("[DEBUG] SCHEMA_CACHE_DISABLED, skipping invalidation for %s", schemaId)
 		return
 	}
 
 	cacheKey := fmt.Sprintf("schema_%s", schemaId)
 	c.Cache.Delete(cacheKey)
 	hits, misses, invalidations, hitRatio := c.Cache.GetStats()
-	log.Printf("[INFO] SCHEMA_CACHE_INVALIDATED for %s | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
+	log.Printf("[DEBUG] SCHEMA_CACHE_INVALIDATED for %s | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
 		schemaId, hits, misses, invalidations, hitRatio)
 }
 
@@ -479,13 +479,13 @@ func (c *Client) InvalidateSchemaCache(schemaId string) {
 func (c *Client) InvalidateAllSchemaCache() {
 	// Skip cache operations if caching is disabled
 	if !c.cacheEnabled {
-		log.Printf("[INFO] SCHEMA_CACHE_DISABLED, skipping all cache invalidation")
+		log.Printf("[DEBUG] SCHEMA_CACHE_DISABLED, skipping all cache invalidation")
 		return
 	}
 
 	c.Cache.DeletePattern("schema_")
 	hits, misses, invalidations, hitRatio := c.Cache.GetStats()
-	log.Printf("[INFO] SCHEMA_CACHE_ALL_INVALIDATED | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
+	log.Printf("[DEBUG] SCHEMA_CACHE_ALL_INVALIDATED | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
 		hits, misses, invalidations, hitRatio)
 }
 
@@ -497,7 +497,7 @@ func (c *Client) GetCacheStats() (hits, misses, invalidations int64, hitRatio fl
 // LogCacheStats logs current cache statistics
 func (c *Client) LogCacheStats() {
 	hits, misses, invalidations, hitRatio := c.Cache.GetStats()
-	log.Printf("[INFO] SCHEMA_CACHE_STATS | Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%, Size=%d",
+	log.Printf("[DEBUG] SCHEMA_CACHE_STATS | Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%, Size=%d",
 		hits, misses, invalidations, hitRatio, len(c.Cache.items))
 }
 
