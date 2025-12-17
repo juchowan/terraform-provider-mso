@@ -464,7 +464,7 @@ func resourceMSOTemplateContractImport(d *schema.ResourceData, m interface{}) ([
 	schemaId := splitImport[0]
 	templateName := splitImport[2]
 	contractName := splitImport[4]
-	schemaCont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	schemaCont, err := msoClient.GetSchemaWithCache(schemaId)
 	if err != nil {
 		return nil, err
 	}
@@ -510,6 +510,8 @@ func resourceMSOTemplateContractCreate(d *schema.ResourceData, m interface{}) er
 	if err != nil {
 		return err
 	}
+	// Invalidate schema cache after modification
+	msoClient.InvalidateSchemaCache(schemaId)
 	log.Printf("[DEBUG] %s: Create finished successfully", d.Id())
 	return resourceMSOTemplateContractRead(d, m)
 }
@@ -520,7 +522,7 @@ func resourceMSOTemplateContractRead(d *schema.ResourceData, m interface{}) erro
 	schemaId := d.Get("schema_id").(string)
 	templateName := d.Get("template_name").(string)
 	contractName := d.Get("contract_name").(string)
-	schemaCont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	schemaCont, err := msoClient.GetSchemaWithCache(schemaId)
 	if err != nil {
 		return errorForObjectNotFound(err, d.Id(), schemaCont, d)
 	}
@@ -644,6 +646,8 @@ func resourceMSOTemplateContractUpdate(d *schema.ResourceData, m interface{}) er
 	if err != nil {
 		return err
 	}
+	// Invalidate schema cache after modification
+	msoClient.InvalidateSchemaCache(schemaId)
 
 	return resourceMSOTemplateContractRead(d, m)
 }
@@ -656,6 +660,8 @@ func resourceMSOTemplateContractDelete(d *schema.ResourceData, m interface{}) er
 	if err != nil && !(response.Exists("code") && response.S("code").String() == "141") {
 		return err
 	}
+	// Invalidate schema cache after modification
+	msoClient.InvalidateSchemaCache(d.Get("schema_id").(string))
 	d.SetId("")
 	log.Printf("[DEBUG] Delete finished successfully")
 	return nil

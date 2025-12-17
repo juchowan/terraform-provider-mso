@@ -158,6 +158,7 @@ func initClient(clientUrl, username string, options ...Option) *Client {
 		username:         username,
 		httpClient:       http.DefaultClient,
 		maxReAuthRetries: 3,
+		Cache:            NewThreadSafeCache(),
 	}
 
 	for _, option := range options {
@@ -677,4 +678,73 @@ func stripQuotes(word string) string {
 		return strings.TrimSuffix(strings.TrimPrefix(word, "\""), "\"")
 	}
 	return word
+}
+
+type ThreadSafeCache struct {
+	mu            sync.RWMutex
+	items         map[string]interface{}
+	hits          int64
+	misses        int64
+	invalidations int64
+}
+
+// NewThreadSafeCache creates and returns a new initialized ThreadSafeCache.
+func NewThreadSafeCache() *ThreadSafeCache {
+	return &ThreadSafeCache{
+		items: make(map[string]interface{}),
+	}
+}
+
+// Set adds or updates an item in the cache.
+func (c *ThreadSafeCache) Set(key string, value interface{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.items[key] = value
+}
+
+// Get retrieves an item from the cache.
+func (c *ThreadSafeCache) Get(key string) (interface{}, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	item, found := c.items[key]
+	if found {
+		c.hits++
+	} else {
+		c.misses++
+	}
+	return item, found
+}
+
+// Delete removes an item from the cache.
+func (c *ThreadSafeCache) Delete(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.items, key)
+	c.invalidations++
+}
+
+// DeletePattern removes all items from the cache matching the pattern.
+func (c *ThreadSafeCache) DeletePattern(pattern string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	deletedCount := 0
+	for key := range c.items {
+		if strings.Contains(key, pattern) {
+			delete(c.items, key)
+			deletedCount++
+		}
+	}
+}
+
+func (c *ThreadSafeCache) GetStats() (hits, misses, invalidations int64, hitRatio float64) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	hits = c.hits
+	misses = c.misses
+	invalidations = c.invalidations
+	total := hits + misses
+	if total > 0 {
+		hitRatio = float64(hits) / float64(total) * 100
+	}
+	return
 }
