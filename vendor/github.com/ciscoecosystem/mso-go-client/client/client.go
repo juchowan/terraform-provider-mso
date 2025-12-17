@@ -386,6 +386,31 @@ func (c *Client) GetVersion() (string, error) {
 	return version, nil
 }
 
+// deepCloneContainer creates a true deep copy of a Container to prevent shared data races
+// This method preserves the gabs library's internal data structure integrity
+func (c *Client) deepCloneContainer(original *container.Container) (*container.Container, error) {
+	if original == nil {
+		return nil, nil
+	}
+
+	// Use gabs-compatible deep cloning via JSON bytes but with proper container creation
+	// This preserves the exact data structure that gabs library methods expect
+	jsonBytes, err := json.Marshal(original.Data())
+	if err != nil {
+		log.Printf("[WARN] Failed to marshal container for cloning: %v", err)
+		return original, nil // Return original as fallback
+	}
+
+	// Create new container from JSON bytes (this preserves gabs internal structure)
+	cloned, err := container.ParseJSON(jsonBytes)
+	if err != nil {
+		log.Printf("[WARN] Failed to parse JSON for cloning: %v", err)
+		return original, nil // Return original as fallback
+	}
+
+	return cloned, nil
+}
+
 // GetSchemaWithCache retrieves schema with caching support
 func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, error) {
 	// Skip cache if disabled - fall back to direct API call
@@ -401,7 +426,15 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 		hits, misses, invalidations, hitRatio := c.Cache.GetStats()
 		log.Printf("[INFO] SCHEMA_CACHE_HIT for %s | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
 			schemaId, hits, misses, invalidations, hitRatio)
-		return cached.(*container.Container), nil
+
+		// CRITICAL: Return deep clone to prevent data races
+		cloned, err := c.deepCloneContainer(cached.(*container.Container))
+		if err != nil {
+			log.Printf("[WARN] Failed to clone cached container for %s, fetching fresh: %v", schemaId, err)
+			// Fallback to fresh API call on clone failure
+			return c.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+		}
+		return cloned, nil
 	}
 
 	hits, misses, invalidations, hitRatio := c.Cache.GetStats()
@@ -418,7 +451,13 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 	c.Cache.Set(cacheKey, cont)
 	log.Printf("[INFO] SCHEMA_CACHED for %s | Size: %d items in cache", schemaId, len(c.Cache.items))
 
-	return cont, nil
+	// CRITICAL: Return deep clone even for fresh data to maintain consistency
+	cloned, err := c.deepCloneContainer(cont)
+	if err != nil {
+		log.Printf("[WARN] Failed to clone fresh container for %s, returning original: %v", schemaId, err)
+		return cont, nil // Return original as fallback
+	}
+	return cloned, nil
 }
 
 // InvalidateSchemaCache removes a schema from cache
@@ -704,14 +743,20 @@ func (c *ThreadSafeCache) Set(key string, value interface{}) {
 
 // Get retrieves an item from the cache.
 func (c *ThreadSafeCache) Get(key string) (interface{}, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	// First, get the item with read lock (allows concurrent reads)
+	c.mu.RLock()
 	item, found := c.items[key]
+	c.mu.RUnlock()
+
+	// Then update statistics with write lock (brief, atomic)
+	c.mu.Lock()
 	if found {
 		c.hits++
 	} else {
 		c.misses++
 	}
+	c.mu.Unlock()
+
 	return item, found
 }
 
