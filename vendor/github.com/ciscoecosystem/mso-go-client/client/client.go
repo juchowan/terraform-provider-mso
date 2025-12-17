@@ -421,20 +421,22 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 
 	cacheKey := fmt.Sprintf("schema_%s", schemaId)
 
-	// Check cache first
-	if cached, found := c.Cache.Get(cacheKey); found {
+	// Check cache first - use atomic get+clone to prevent race conditions
+	cloneFunc := func(item interface{}) (interface{}, error) {
+		return c.deepCloneContainer(item.(*container.Container))
+	}
+
+	if cached, found, cloneErr := c.Cache.GetContainerClone(cacheKey, cloneFunc); found {
 		hits, misses, invalidations, hitRatio := c.Cache.GetStats()
 		log.Printf("[DEBUG] SCHEMA_CACHE_HIT for %s | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
 			schemaId, hits, misses, invalidations, hitRatio)
 
-		// CRITICAL: Return deep clone to prevent data races
-		cloned, err := c.deepCloneContainer(cached.(*container.Container))
-		if err != nil {
-			log.Printf("[WARN] Failed to clone cached container for %s, fetching fresh: %v", schemaId, err)
+		if cloneErr != nil {
+			log.Printf("[WARN] Failed to clone cached container for %s, fetching fresh: %v", schemaId, cloneErr)
 			// Fallback to fresh API call on clone failure
 			return c.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 		}
-		return cloned, nil
+		return cached.(*container.Container), nil
 	}
 
 	hits, misses, invalidations, hitRatio := c.Cache.GetStats()
@@ -758,6 +760,39 @@ func (c *ThreadSafeCache) Get(key string) (interface{}, bool) {
 	c.mu.Unlock()
 
 	return item, found
+}
+
+// GetContainerClone retrieves an item from cache and returns a deep clone atomically
+// This prevents race conditions between cache access and cloning
+func (c *ThreadSafeCache) GetContainerClone(key string, cloneFunc func(interface{}) (interface{}, error)) (interface{}, bool, error) {
+	// Get the item with read lock and clone while lock is held
+	c.mu.RLock()
+	item, found := c.items[key]
+	var cloned interface{}
+	var cloneErr error
+
+	if found && cloneFunc != nil {
+		// Clone while still holding the read lock - prevents race conditions
+		cloned, cloneErr = cloneFunc(item)
+	} else if found {
+		cloned = item // No cloning requested
+	}
+	c.mu.RUnlock()
+
+	// Update statistics with write lock (brief, atomic)
+	c.mu.Lock()
+	if found {
+		c.hits++
+	} else {
+		c.misses++
+	}
+	c.mu.Unlock()
+
+	if found && cloneErr != nil {
+		return nil, found, cloneErr
+	}
+
+	return cloned, found, nil
 }
 
 // Delete removes an item from the cache.
