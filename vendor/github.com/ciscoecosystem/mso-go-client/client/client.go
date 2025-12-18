@@ -36,17 +36,6 @@ const DefaultBackoffMinDelay int = 4
 const DefaultBackoffMaxDelay int = 60
 const DefaultBackoffDelayFactor float64 = 3
 
-// schemaBufferPool provides reusable buffers for schema cloning to avoid memory allocations
-// Uses adaptive sizing - starts small and grows with actual schema sizes
-var schemaBufferPool = sync.Pool{
-	New: func() interface{} {
-		// Conservative initial size - buffers grow automatically as needed
-		// Optimizes memory usage for diverse deployment sizes (50KB to 10MB+ schemas)
-		buf := make([]byte, 0, 256*1024) // 256KB initial capacity
-		return bytes.NewBuffer(buf)
-	},
-}
-
 // Client is the main entry point
 type Client struct {
 	BaseURL            *url.URL
@@ -398,38 +387,19 @@ func (c *Client) GetVersion() (string, error) {
 }
 
 // deepCloneContainer creates a true deep copy of a Container to prevent shared data races
-// Uses adaptive buffer pooling - efficient for any deployment size (50KB to 10MB+ schemas)
 func (c *Client) deepCloneContainer(original *container.Container) (*container.Container, error) {
 	if original == nil {
 		return nil, nil
 	}
 
-	// Get reusable buffer from pool - thread-safe for high parallelism
-	buf := schemaBufferPool.Get().(*bytes.Buffer)
-	defer func() {
-		// Smart buffer management: retain reasonably sized buffers, discard oversized ones
-		const maxRetainedSize = 8 * 1024 * 1024 // 8MB limit for pool retention
-
-		if buf.Cap() <= maxRetainedSize {
-			buf.Reset() // Clear data but keep capacity for reuse
-			schemaBufferPool.Put(buf)
-		}
-		// Oversized buffers (>8MB) are discarded - GC will reclaim memory
-		// This prevents memory bloat while allowing large schemas to work efficiently
-	}()
-
-	buf.Reset() // Clear any previous data
-
-	// Stream JSON encoding directly to buffer (no intermediate []byte allocation)
-	encoder := json.NewEncoder(buf)
-	if err := encoder.Encode(original.Data()); err != nil {
+	// Use simple JSON marshal/unmarshal for deep cloning
+	jsonBytes, err := json.Marshal(original.Data())
+	if err != nil {
 		log.Printf("[WARN] Failed to marshal container for cloning: %v", err)
 		return original, nil // Return original as fallback
 	}
 
-	// Stream JSON decoding directly from buffer using container's ParseJSONDecoder
-	decoder := json.NewDecoder(buf)
-	cloned, err := container.ParseJSONDecoder(decoder)
+	cloned, err := container.ParseJSON(jsonBytes)
 	if err != nil {
 		log.Printf("[WARN] Failed to parse JSON for cloning: %v", err)
 		return original, nil // Return original as fallback
