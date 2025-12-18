@@ -466,6 +466,8 @@ func resourceMSOTemplateContractImport(d *schema.ResourceData, m interface{}) ([
 	contractName := splitImport[4]
 	schemaCont, err := msoClient.GetSchemaWithCache(schemaId)
 	if err != nil {
+		log.Printf("[DEBUG] Clearing schema cache due to API error: %v", err)
+		msoClient.ClearCache()
 		return nil, err
 	}
 	err = setContractFromSchema(d, schemaCont, schemaId, templateName, contractName)
@@ -524,6 +526,8 @@ func resourceMSOTemplateContractRead(d *schema.ResourceData, m interface{}) erro
 	contractName := d.Get("contract_name").(string)
 	schemaCont, err := msoClient.GetSchemaWithCache(schemaId)
 	if err != nil {
+		log.Printf("[DEBUG] Clearing schema cache due to API error: %v", err)
+		msoClient.ClearCache()
 		return errorForObjectNotFound(err, d.Id(), schemaCont, d)
 	}
 	err = setContractFromSchema(d, schemaCont, schemaId, templateName, contractName)

@@ -1,7 +1,6 @@
 package client
 
 import (
-	"strings"
 	"sync"
 )
 
@@ -62,19 +61,6 @@ func (c *Cache) Delete(key string) {
 	c.invalidations++
 }
 
-// DeletePattern removes all items from the cache matching the pattern.
-func (c *Cache) DeletePattern(pattern string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	deletedCount := 0
-	for key := range c.items {
-		if strings.Contains(key, pattern) {
-			delete(c.items, key)
-			deletedCount++
-		}
-	}
-}
-
 // GetStats returns cache performance statistics
 func (c *Cache) GetStats() (hits, misses, invalidations int64, hitRatio float64) {
 	c.mu.RLock()
@@ -94,4 +80,14 @@ func (c *Cache) Size() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return len(c.items)
+}
+
+// Clear removes all items from the cache
+func (c *Cache) Clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	itemCount := len(c.items)
+	c.items = make(map[string]interface{})
+	c.invalidations += int64(itemCount)
 }

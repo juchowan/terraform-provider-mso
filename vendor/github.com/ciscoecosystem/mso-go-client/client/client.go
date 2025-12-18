@@ -451,17 +451,17 @@ func (c *Client) InvalidateSchemaCache(schemaId string) {
 		schemaId, hits, misses, invalidations, hitRatio)
 }
 
-// InvalidateAllSchemaCache removes all schema caches (for safety)
-func (c *Client) InvalidateAllSchemaCache() {
+// ClearCache removes all cached items (for cleanup and error recovery)
+func (c *Client) ClearCache() {
 	// Skip cache operations if caching is disabled
 	if !c.cacheEnabled {
-		log.Printf("[DEBUG] SCHEMA_CACHE_DISABLED, skipping all cache invalidation")
+		log.Printf("[DEBUG] CACHE_DISABLED, skipping cache clear")
 		return
 	}
 
-	c.Cache.DeletePattern("schema_")
+	c.Cache.Clear()
 	hits, misses, invalidations, hitRatio := c.Cache.GetStats()
-	log.Printf("[DEBUG] SCHEMA_CACHE_ALL_INVALIDATED | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
+	log.Printf("[DEBUG] CACHE_CLEARED | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
 		hits, misses, invalidations, hitRatio)
 }
 

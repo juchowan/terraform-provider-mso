@@ -127,6 +127,8 @@ func resourceMSOSchemaTemplateFilterEntryImport(d *schema.ResourceData, m interf
 	schemaId := get_attribute[0]
 	cont, err := msoClient.GetSchemaWithCache(schemaId)
 	if err != nil {
+		log.Printf("[DEBUG] Clearing schema cache due to API error: %v", err)
+		msoClient.ClearCache()
 		return nil, err
 	}
 	d.Set("schema_id", schemaId)
@@ -297,6 +299,8 @@ func resourceMSOSchemaTemplateFilterEntryCreate(d *schema.ResourceData, m interf
 	foundFilter := false
 	cont, err := msoClient.GetSchemaWithCache(schemaId)
 	if err != nil {
+		log.Printf("[DEBUG] Clearing schema cache due to API error: %v", err)
+		msoClient.ClearCache()
 		return err
 	}
 	count, err := cont.ArrayCount("templates")
@@ -383,6 +387,8 @@ func resourceMSOSchemaTemplateFilterEntryRead(d *schema.ResourceData, m interfac
 
 	cont, err := msoClient.GetSchemaWithCache(schemaId)
 	if err != nil {
+		log.Printf("[DEBUG] Clearing schema cache due to API error: %v", err)
+		msoClient.ClearCache()
 		return errorForObjectNotFound(err, d.Id(), cont, d)
 	}
 	count, err := cont.ArrayCount("templates")
@@ -608,6 +614,8 @@ func resourceMSOSchemaTemplateFilterEntryDelete(d *schema.ResourceData, m interf
 	entries = append(entries, entryMap)
 	cont, err := msoClient.GetSchemaWithCache(schemaId)
 	if err != nil {
+		log.Printf("[DEBUG] Clearing schema cache due to API error: %v", err)
+		msoClient.ClearCache()
 		return err
 	}
 	count, err := cont.ArrayCount("templates")
