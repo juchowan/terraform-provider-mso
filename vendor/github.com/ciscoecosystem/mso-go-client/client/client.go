@@ -57,7 +57,7 @@ type Client struct {
 	backoffMinDelay    int
 	backoffMaxDelay    int
 	backoffDelayFactor float64
-	Cache              *ThreadSafeCache
+	Cache              *Cache
 	cacheEnabled       bool
 }
 
@@ -158,7 +158,7 @@ func initClient(clientUrl, username string, options ...Option) *Client {
 		username:         username,
 		httpClient:       http.DefaultClient,
 		maxReAuthRetries: 3,
-		Cache:            NewThreadSafeCache(),
+		Cache:            NewCache(),
 	}
 
 	for _, option := range options {
@@ -425,7 +425,7 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 
 	// Store in cache
 	c.Cache.Set(cacheKey, cont)
-	log.Printf("[DEBUG] SCHEMA_CACHED for %s | Size: %d items in cache", schemaId, len(c.Cache.items))
+	log.Printf("[DEBUG] SCHEMA_CACHED for %s | Size: %d items in cache", schemaId, c.Cache.Size())
 
 	// CRITICAL: Return deep clone even for fresh data to maintain consistency
 	cloned, err := cont.DeepClone()
@@ -474,7 +474,7 @@ func (c *Client) GetCacheStats() (hits, misses, invalidations int64, hitRatio fl
 func (c *Client) LogCacheStats() {
 	hits, misses, invalidations, hitRatio := c.Cache.GetStats()
 	log.Printf("[DEBUG] SCHEMA_CACHE_STATS | Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%, Size=%d",
-		hits, misses, invalidations, hitRatio, len(c.Cache.items))
+		hits, misses, invalidations, hitRatio, c.Cache.Size())
 }
 
 // Compares the version to the retrieved version.
@@ -695,84 +695,3 @@ func stripQuotes(word string) string {
 	return word
 }
 
-type ThreadSafeCache struct {
-	mu            sync.RWMutex
-	items         map[string]interface{}
-	hits          int64
-	misses        int64
-	invalidations int64
-}
-
-// NewThreadSafeCache creates and returns a new initialized ThreadSafeCache.
-func NewThreadSafeCache() *ThreadSafeCache {
-	return &ThreadSafeCache{
-		items: make(map[string]interface{}),
-	}
-}
-
-// Set adds or updates an item in the cache.
-func (c *ThreadSafeCache) Set(key string, value interface{}) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.items[key] = value
-}
-
-// Get atomically gets and clones an item to prevent race conditions
-func (c *ThreadSafeCache) Get(key string, cloneFunc func(interface{}) (interface{}, error)) (interface{}, bool, error) {
-	c.mu.RLock()
-	item, found := c.items[key]
-
-	var result interface{}
-	var cloneErr error
-
-	if found {
-		// Clone while holding read lock - prevents race conditions
-		result, cloneErr = cloneFunc(item)
-	}
-	c.mu.RUnlock()
-
-	// Update statistics
-	c.mu.Lock()
-	if found {
-		c.hits++
-	} else {
-		c.misses++
-	}
-	c.mu.Unlock()
-
-	return result, found, cloneErr
-}
-
-// Delete removes an item from the cache.
-func (c *ThreadSafeCache) Delete(key string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.items, key)
-	c.invalidations++
-}
-
-// DeletePattern removes all items from the cache matching the pattern.
-func (c *ThreadSafeCache) DeletePattern(pattern string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	deletedCount := 0
-	for key := range c.items {
-		if strings.Contains(key, pattern) {
-			delete(c.items, key)
-			deletedCount++
-		}
-	}
-}
-
-func (c *ThreadSafeCache) GetStats() (hits, misses, invalidations int64, hitRatio float64) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	hits = c.hits
-	misses = c.misses
-	invalidations = c.invalidations
-	total := hits + misses
-	if total > 0 {
-		hitRatio = float64(hits) / float64(total) * 100
-	}
-	return
-}
