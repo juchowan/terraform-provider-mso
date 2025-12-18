@@ -21,16 +21,16 @@ func NewCache() *Cache {
 }
 
 // Set adds or updates an item in the cache.
-func (c *Cache) Set(key string, value interface{}) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.items[key] = value
+func (cache *Cache) Set(key string, value interface{}) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	cache.items[key] = value
 }
 
 // Get atomically gets and clones an item to prevent race conditions
-func (c *Cache) Get(key string, cloneFunc func(interface{}) (interface{}, error)) (interface{}, bool, error) {
-	c.mu.RLock()
-	item, found := c.items[key]
+func (cache *Cache) Get(key string, cloneFunc func(interface{}) (interface{}, error)) (interface{}, bool, error) {
+	cache.mu.RLock()
+	item, found := cache.items[key]
 
 	var result interface{}
 	var cloneErr error
@@ -39,35 +39,35 @@ func (c *Cache) Get(key string, cloneFunc func(interface{}) (interface{}, error)
 		// Clone while holding read lock - prevents race conditions
 		result, cloneErr = cloneFunc(item)
 	}
-	c.mu.RUnlock()
+	cache.mu.RUnlock()
 
 	// Update statistics
-	c.mu.Lock()
+	cache.mu.Lock()
 	if found {
-		c.hits++
+		cache.hits++
 	} else {
-		c.misses++
+		cache.misses++
 	}
-	c.mu.Unlock()
+	cache.mu.Unlock()
 
 	return result, found, cloneErr
 }
 
 // Delete removes an item from the cache.
-func (c *Cache) Delete(key string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.items, key)
-	c.invalidations++
+func (cache *Cache) Delete(key string) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	delete(cache.items, key)
+	cache.invalidations++
 }
 
 // GetStats returns cache performance statistics
-func (c *Cache) GetStats() (hits, misses, invalidations int64, hitRatio float64) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	hits = c.hits
-	misses = c.misses
-	invalidations = c.invalidations
+func (cache *Cache) GetStats() (hits, misses, invalidations int64, hitRatio float64) {
+	cache.mu.RLock()
+	defer cache.mu.RUnlock()
+	hits = cache.hits
+	misses = cache.misses
+	invalidations = cache.invalidations
 	total := hits + misses
 	if total > 0 {
 		hitRatio = float64(hits) / float64(total) * 100
@@ -76,18 +76,18 @@ func (c *Cache) GetStats() (hits, misses, invalidations int64, hitRatio float64)
 }
 
 // Size returns the number of items in the cache
-func (c *Cache) Size() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.items)
+func (cache *Cache) Size() int {
+	cache.mu.RLock()
+	defer cache.mu.RUnlock()
+	return len(cache.items)
 }
 
 // Clear removes all items from the cache
-func (c *Cache) Clear() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (cache *Cache) Clear() {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
 
-	itemCount := len(c.items)
-	c.items = make(map[string]interface{})
-	c.invalidations += int64(itemCount)
+	itemCount := len(cache.items)
+	cache.items = make(map[string]interface{})
+	cache.invalidations += int64(itemCount)
 }
