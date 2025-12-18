@@ -386,28 +386,6 @@ func (c *Client) GetVersion() (string, error) {
 	return version, nil
 }
 
-// deepCloneContainer creates a true deep copy of a Container to prevent shared data races
-func (c *Client) deepCloneContainer(original *container.Container) (*container.Container, error) {
-	if original == nil {
-		return nil, nil
-	}
-
-	// Use simple JSON marshal/unmarshal for deep cloning
-	jsonBytes, err := json.Marshal(original.Data())
-	if err != nil {
-		log.Printf("[WARN] Failed to marshal container for cloning: %v", err)
-		return original, nil // Return original as fallback
-	}
-
-	cloned, err := container.ParseJSON(jsonBytes)
-	if err != nil {
-		log.Printf("[WARN] Failed to parse JSON for cloning: %v", err)
-		return original, nil // Return original as fallback
-	}
-
-	return cloned, nil
-}
-
 // GetSchemaWithCache retrieves schema with caching support
 func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, error) {
 	// Skip cache if disabled - fall back to direct API call
@@ -420,7 +398,7 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 
 	// Check cache first - use atomic get+clone
 	cloneFunc := func(item interface{}) (interface{}, error) {
-		return c.deepCloneContainer(item.(*container.Container))
+		return item.(*container.Container).DeepClone()
 	}
 
 	if cached, found, cloneErr := c.Cache.Get(cacheKey, cloneFunc); found {
@@ -450,7 +428,7 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 	log.Printf("[DEBUG] SCHEMA_CACHED for %s | Size: %d items in cache", schemaId, len(c.Cache.items))
 
 	// CRITICAL: Return deep clone even for fresh data to maintain consistency
-	cloned, err := c.deepCloneContainer(cont)
+	cloned, err := cont.DeepClone()
 	if err != nil {
 		log.Printf("[WARN] Failed to clone fresh container for %s, returning original: %v", schemaId, err)
 		return cont, nil // Return original as fallback

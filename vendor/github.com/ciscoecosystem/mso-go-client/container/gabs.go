@@ -604,3 +604,23 @@ func (g *Container) SearchInObjectListWithIndex(condition func(*Container) bool)
 	}
 	return nil, -1, fmt.Errorf("Object Not found")
 }
+
+// DeepClone creates a true deep copy of a Container to prevent shared data races
+func (g *Container) DeepClone() (*Container, error) {
+	if g == nil {
+		return nil, nil
+	}
+
+	// Use JSON marshal/unmarshal for deep cloning
+	jsonBytes, err := json.Marshal(g.Data())
+	if err != nil {
+		return g, err // Return original on error
+	}
+
+	cloned, err := ParseJSON(jsonBytes)
+	if err != nil {
+		return g, err // Return original on error
+	}
+
+	return cloned, nil
+}
