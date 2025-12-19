@@ -402,9 +402,7 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 	}
 
 	if cached, found, cloneErr := c.Cache.Get(cacheKey, cloneFunc); found {
-		hits, misses, invalidations, hitRatio := c.Cache.GetStats()
-		log.Printf("[DEBUG] SCHEMA_CACHE_HIT for %s | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
-			schemaId, hits, misses, invalidations, hitRatio)
+		c.Cache.LogEvent("SCHEMA_CACHE_HIT", schemaId)
 
 		if cloneErr != nil {
 			log.Printf("[WARN] Failed to clone cached container for %s, fetching fresh: %v", schemaId, cloneErr)
@@ -413,9 +411,7 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 		return cached.(*container.Container), nil
 	}
 
-	hits, misses, invalidations, hitRatio := c.Cache.GetStats()
-	log.Printf("[DEBUG] SCHEMA_CACHE_MISS for %s, fetching from API | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
-		schemaId, hits, misses, invalidations, hitRatio)
+	c.Cache.LogEvent("SCHEMA_CACHE_MISS", schemaId)
 
 	// Cache miss - fetch from API
 	cont, err := c.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
@@ -425,7 +421,7 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 
 	// Store in cache
 	c.Cache.Set(cacheKey, cont)
-	log.Printf("[DEBUG] SCHEMA_CACHED for %s | Size: %d items in cache", schemaId, c.Cache.Size())
+	c.Cache.LogEventWithSize("SCHEMA_CACHED", schemaId)
 
 	// CRITICAL: Return deep clone even for fresh data to maintain consistency
 	cloned, err := cont.DeepClone()
@@ -446,9 +442,7 @@ func (c *Client) InvalidateSchemaCache(schemaId string) {
 
 	cacheKey := fmt.Sprintf("schema_%s", schemaId)
 	c.Cache.Delete(cacheKey)
-	hits, misses, invalidations, hitRatio := c.Cache.GetStats()
-	log.Printf("[DEBUG] SCHEMA_CACHE_INVALIDATED for %s | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
-		schemaId, hits, misses, invalidations, hitRatio)
+	c.Cache.LogEvent("SCHEMA_CACHE_INVALIDATED", schemaId)
 }
 
 // ClearCache removes all cached items (for cleanup and error recovery)
@@ -460,21 +454,7 @@ func (c *Client) ClearCache() {
 	}
 
 	c.Cache.Clear()
-	hits, misses, invalidations, hitRatio := c.Cache.GetStats()
-	log.Printf("[DEBUG] CACHE_CLEARED | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
-		hits, misses, invalidations, hitRatio)
-}
-
-// GetCacheStats returns current cache statistics
-func (c *Client) GetCacheStats() (hits, misses, invalidations int64, hitRatio float64) {
-	return c.Cache.GetStats()
-}
-
-// LogCacheStats logs current cache statistics
-func (c *Client) LogCacheStats() {
-	hits, misses, invalidations, hitRatio := c.Cache.GetStats()
-	log.Printf("[DEBUG] SCHEMA_CACHE_STATS | Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%, Size=%d",
-		hits, misses, invalidations, hitRatio, c.Cache.Size())
+	c.Cache.LogOperation("CACHE_CLEARED")
 }
 
 // Compares the version to the retrieved version.
@@ -694,4 +674,3 @@ func stripQuotes(word string) string {
 	}
 	return word
 }
-

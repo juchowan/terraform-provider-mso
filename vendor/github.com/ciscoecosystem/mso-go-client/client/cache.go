@@ -1,6 +1,7 @@
 package client
 
 import (
+	"log"
 	"sync"
 )
 
@@ -90,4 +91,24 @@ func (cache *Cache) Clear() {
 	itemCount := len(cache.items)
 	cache.items = make(map[string]interface{})
 	cache.invalidations += int64(itemCount)
+}
+
+// LogEvent logs cache events with consistent statistics formatting
+func (cache *Cache) LogEvent(event, schemaId string) {
+	hits, misses, invalidations, hitRatio := cache.GetStats()
+	log.Printf("[DEBUG] %s for %s | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
+		event, schemaId, hits, misses, invalidations, hitRatio)
+}
+
+// LogEventWithSize logs cache events with size information
+func (cache *Cache) LogEventWithSize(event, schemaId string) {
+	log.Printf("[DEBUG] %s for %s | Size: %d items in cache",
+		event, schemaId, cache.Size())
+}
+
+// LogOperation logs cache operations without schema ID
+func (cache *Cache) LogOperation(event string) {
+	hits, misses, invalidations, hitRatio := cache.GetStats()
+	log.Printf("[DEBUG] %s | Stats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%%",
+		event, hits, misses, invalidations, hitRatio)
 }
