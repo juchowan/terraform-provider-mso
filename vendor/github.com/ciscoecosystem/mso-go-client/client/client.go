@@ -59,6 +59,7 @@ type Client struct {
 	backoffDelayFactor float64
 	Cache              *Cache
 	cacheEnabled       bool
+	deepCloneEnabled   bool
 }
 
 type CallbackRetryFunc func(*container.Container) bool
@@ -146,6 +147,12 @@ func CacheEnabled(enabled bool) Option {
 	}
 }
 
+func DeepCloneEnabled(enabled bool) Option {
+	return func(client *Client) {
+		client.deepCloneEnabled = enabled
+	}
+}
+
 func initClient(clientUrl, username string, options ...Option) *Client {
 	var transport *http.Transport
 	bUrl, err := url.Parse(clientUrl)
@@ -159,6 +166,7 @@ func initClient(clientUrl, username string, options ...Option) *Client {
 		httpClient:       http.DefaultClient,
 		maxReAuthRetries: 3,
 		Cache:            NewCache(),
+		deepCloneEnabled: true, // Default to enabled for backwards compatibility
 	}
 
 	for _, option := range options {
@@ -396,8 +404,12 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 
 	cacheKey := fmt.Sprintf("schema_%s", schemaId)
 
-	// Check cache first - use atomic get+clone
+	// Check cache first - use atomic get+clone (or direct reference if cloning disabled)
 	cloneFunc := func(item interface{}) (interface{}, error) {
+		if !c.deepCloneEnabled {
+			log.Printf("[DEBUG] DEEP_CLONE_DISABLED for cached %s, returning direct reference", schemaId)
+			return item, nil
+		}
 		return item.(*container.Container).DeepClone()
 	}
 
@@ -423,7 +435,12 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 	c.Cache.Set(cacheKey, cont)
 	c.Cache.LogEventWithSize("SCHEMA_CACHED", schemaId)
 
-	// CRITICAL: Return deep clone even for fresh data to maintain consistency
+	// Return deep clone for fresh data if enabled, otherwise return original
+	if !c.deepCloneEnabled {
+		log.Printf("[DEBUG] DEEP_CLONE_DISABLED for fresh %s, returning original reference", schemaId)
+		return cont, nil
+	}
+
 	cloned, err := cont.DeepClone()
 	if err != nil {
 		log.Printf("[WARN] Failed to clone fresh container for %s, returning original: %v", schemaId, err)

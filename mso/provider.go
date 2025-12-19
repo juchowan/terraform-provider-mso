@@ -71,6 +71,12 @@ func Provider() terraform.ResourceProvider {
 				DefaultFunc: schema.EnvDefaultFunc("MSO_ENABLE_CACHE", false),
 				Description: "Enable schema caching for improved performance. Defaults to false (disabled).",
 			},
+			"disable_deep_clone": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				DefaultFunc: schema.EnvDefaultFunc("MSO_DISABLE_DEEP_CLONE", false),
+				Description: "Disable deep cloning of cached containers for performance testing. Defaults to false (deep clone enabled).",
+			},
 		},
 
 		ResourcesMap: map[string]*schema.Resource{
@@ -226,7 +232,8 @@ func configureClient(d *schema.ResourceData) (interface{}, error) {
 		ProxyUrl:    d.Get("proxy_url").(string),
 		Domain:      d.Get("domain").(string),
 		Platform:    d.Get("platform").(string),
-		EnableCache: d.Get("enable_cache").(bool),
+		EnableCache:      d.Get("enable_cache").(bool),
+		DisableDeepClone: d.Get("disable_deep_clone").(bool),
 	}
 
 	config.MaxRetries = 2
@@ -265,7 +272,7 @@ func (c Config) Valid() error {
 func (c Config) getClient() interface{} {
 	if c.Password != "" {
 
-		return client.GetClient(c.URL, c.Username, client.Password(c.Password), client.Insecure(c.IsInsecure), client.ProxyUrl(c.ProxyUrl), client.Domain(c.Domain), client.Platform(c.Platform), client.MaxRetries(c.MaxRetries), client.CacheEnabled(c.EnableCache))
+		return client.GetClient(c.URL, c.Username, client.Password(c.Password), client.Insecure(c.IsInsecure), client.ProxyUrl(c.ProxyUrl), client.Domain(c.Domain), client.Platform(c.Platform), client.MaxRetries(c.MaxRetries), client.CacheEnabled(c.EnableCache), client.DeepCloneEnabled(!c.DisableDeepClone))
 
 	}
 	return nil
@@ -273,13 +280,14 @@ func (c Config) getClient() interface{} {
 
 // Config
 type Config struct {
-	Username    string
-	Password    string
-	IsInsecure  bool
-	ProxyUrl    string
-	URL         string
-	Domain      string
-	Platform    string
-	MaxRetries  int
-	EnableCache bool
+	Username         string
+	Password         string
+	IsInsecure       bool
+	ProxyUrl         string
+	URL              string
+	Domain           string
+	Platform         string
+	MaxRetries       int
+	EnableCache      bool
+	DisableDeepClone bool
 }
