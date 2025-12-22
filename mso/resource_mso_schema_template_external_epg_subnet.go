@@ -80,7 +80,7 @@ func resourceMSOTemplateExtenalepgSubnetImport(d *schema.ResourceData, m interfa
 	import_split := import_attribute.FindStringSubmatch(d.Id())
 	get_attribute := strings.Split(d.Id(), "/")
 	schemaId := get_attribute[0]
-	cont, err := msoClient.GetSchemaWithCache(schemaId)
+	cont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +194,7 @@ func resourceMSOTemplateExtenalepgSubnetCreate(d *schema.ResourceData, m interfa
 	}
 
 	// Invalidate cache after schema modification
-	msoClient.InvalidateSchemaCache(schemaID)
+	msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 	return resourceMSOTemplateExtenalepgSubnetRead(d, m)
 }
 
@@ -205,7 +205,7 @@ func resourceMSOTemplateExtenalepgSubnetRead(d *schema.ResourceData, m interface
 
 	schemaId := d.Get("schema_id").(string)
 
-	cont, err := msoClient.GetSchemaWithCache(schemaId)
+	cont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	if err != nil {
 		return errorForObjectNotFound(err, d.Id(), cont, d)
 	}
@@ -311,7 +311,7 @@ func resourceMSOTemplateExtenalepgSubnetUpdate(d *schema.ResourceData, m interfa
 		Aggregate = tempVar.([]interface{})
 	}
 
-	cont, err := msoClient.GetSchemaWithCache(schemaID)
+	cont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 	if err != nil {
 		return err
 	}
@@ -333,7 +333,7 @@ func resourceMSOTemplateExtenalepgSubnetUpdate(d *schema.ResourceData, m interfa
 	}
 
 	// Invalidate cache after schema modification
-	msoClient.InvalidateSchemaCache(schemaID)
+	msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 	return resourceMSOTemplateExtenalepgSubnetRead(d, m)
 }
 
@@ -361,7 +361,7 @@ func resourceMSOTemplateExtenalepgSubnetDelete(d *schema.ResourceData, m interfa
 		Aggregate = tempVar.([]interface{})
 	}
 
-	cont, err := msoClient.GetSchemaWithCache(schemaID)
+	cont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 	if err != nil {
 		return err
 	}
@@ -386,7 +386,7 @@ func resourceMSOTemplateExtenalepgSubnetDelete(d *schema.ResourceData, m interfa
 	}
 
 	// Invalidate cache after schema modification
-	msoClient.InvalidateSchemaCache(schemaID)
+	msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 	d.SetId("")
 	return nil
 }

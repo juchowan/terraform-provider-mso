@@ -464,7 +464,7 @@ func resourceMSOTemplateContractImport(d *schema.ResourceData, m interface{}) ([
 	schemaId := splitImport[0]
 	templateName := splitImport[2]
 	contractName := splitImport[4]
-	schemaCont, err := msoClient.GetSchemaWithCache(schemaId)
+	schemaCont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	if err != nil {
 		log.Printf("[DEBUG] Clearing schema cache due to API error: %v", err)
 		msoClient.ClearCache()
@@ -513,7 +513,7 @@ func resourceMSOTemplateContractCreate(d *schema.ResourceData, m interface{}) er
 		return err
 	}
 	// Invalidate schema cache after modification
-	msoClient.InvalidateSchemaCache(schemaId)
+	msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	log.Printf("[DEBUG] %s: Create finished successfully", d.Id())
 	return resourceMSOTemplateContractRead(d, m)
 }
@@ -524,7 +524,7 @@ func resourceMSOTemplateContractRead(d *schema.ResourceData, m interface{}) erro
 	schemaId := d.Get("schema_id").(string)
 	templateName := d.Get("template_name").(string)
 	contractName := d.Get("contract_name").(string)
-	schemaCont, err := msoClient.GetSchemaWithCache(schemaId)
+	schemaCont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	if err != nil {
 		log.Printf("[DEBUG] Clearing schema cache due to API error: %v", err)
 		msoClient.ClearCache()
@@ -651,7 +651,7 @@ func resourceMSOTemplateContractUpdate(d *schema.ResourceData, m interface{}) er
 		return err
 	}
 	// Invalidate schema cache after modification
-	msoClient.InvalidateSchemaCache(schemaId)
+	msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 
 	return resourceMSOTemplateContractRead(d, m)
 }
@@ -665,7 +665,7 @@ func resourceMSOTemplateContractDelete(d *schema.ResourceData, m interface{}) er
 		return err
 	}
 	// Invalidate schema cache after modification
-	msoClient.InvalidateSchemaCache(d.Get("schema_id").(string))
+	msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", d.Get("schema_id").(string)))
 	d.SetId("")
 	log.Printf("[DEBUG] Delete finished successfully")
 	return nil
