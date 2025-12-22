@@ -31,8 +31,6 @@ import (
 	"io"
 	"io/ioutil"
 	"strings"
-
-	"github.com/mitchellh/copystructure"
 )
 
 //--------------------------------------------------------------------------------------------------
@@ -613,25 +611,7 @@ func (g *Container) DeepClone() (*Container, error) {
 		return nil, nil
 	}
 
-	// OPTIMIZATION: Use native Go reflection-based copying (3-5x faster than JSON)
-	clonedData, err := copystructure.Copy(g.Data())
-	if err != nil {
-		// Fallback to JSON method on copystructure error
-		return g.jsonCloneFallback()
-	}
-
-	// Create new container with cloned data
-	cloned := New()
-	if _, err := cloned.Set(clonedData, ""); err != nil {
-		// Fallback to JSON method if container creation fails
-		return g.jsonCloneFallback()
-	}
-
-	return cloned, nil
-}
-
-// jsonCloneFallback provides the original JSON-based cloning as fallback
-func (g *Container) jsonCloneFallback() (*Container, error) {
+	// Use JSON marshal/unmarshal for deep cloning
 	jsonBytes, err := json.Marshal(g.Data())
 	if err != nil {
 		return g, err // Return original on error

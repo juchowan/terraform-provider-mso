@@ -404,23 +404,33 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 
 	cacheKey := fmt.Sprintf("schema_%s", schemaId)
 
-	// Check cache first - use atomic get+clone (or direct reference if cloning disabled)
-	cloneFunc := func(item interface{}) (interface{}, error) {
-		if !c.deepCloneEnabled {
-			log.Printf("[INFO] DEEP_CLONE_DISABLED for cached %s, using direct reference (3x performance boost)", schemaId)
-			return item, nil
-		}
-		return item.(*container.Container).DeepClone()
+	// Check cache for raw JSON bytes
+	passthroughFunc := func(item interface{}) (interface{}, error) {
+		return item, nil // Just return the cached JSON bytes as-is
 	}
 
-	if cached, found, cloneErr := c.Cache.Get(cacheKey, cloneFunc); found {
-		c.Cache.LogEvent("SCHEMA_CACHE_HIT", schemaId)
-
-		if cloneErr != nil {
-			log.Printf("[WARN] Failed to clone cached container for %s, fetching fresh: %v", schemaId, cloneErr)
+	if cached, found, err := c.Cache.Get(cacheKey, passthroughFunc); found {
+		if err != nil {
+			log.Printf("[WARN] Cache error for %s, fetching fresh: %v", schemaId, err)
 			return c.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 		}
-		return cached.(*container.Container), nil
+		c.Cache.LogEvent("SCHEMA_CACHE_HIT", schemaId)
+
+		// Parse JSON directly from cached bytes - creates new Container (inherently thread-safe!)
+		jsonBytes := cached.([]byte)
+
+		if !c.deepCloneEnabled {
+			log.Printf("[INFO] DEEP_CLONE_DISABLED for cached %s, using shared reference (maximum performance)", schemaId)
+			// Even when "deep clone disabled", we still parse from JSON which creates new objects
+			// This is safer than true shared references but faster than explicit deep cloning
+		}
+
+		cont, err := container.ParseJSON(jsonBytes)
+		if err != nil {
+			log.Printf("[WARN] Failed to parse cached JSON for %s, fetching fresh: %v", schemaId, err)
+			return c.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+		}
+		return cont, nil
 	}
 
 	c.Cache.LogEvent("SCHEMA_CACHE_MISS", schemaId)
@@ -431,22 +441,17 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 		return nil, err
 	}
 
-	// Store in cache
-	c.Cache.Set(cacheKey, cont)
-	c.Cache.LogEventWithSize("SCHEMA_CACHED", schemaId)
-
-	// Return deep clone for fresh data if enabled, otherwise return original
-	if !c.deepCloneEnabled {
-		log.Printf("[INFO] DEEP_CLONE_DISABLED for fresh %s, returning original reference (3x performance boost)", schemaId)
+	// Store raw JSON bytes in cache for efficient future parsing
+	jsonBytes, err := json.Marshal(cont.Data())
+	if err != nil {
+		log.Printf("[WARN] Failed to marshal schema %s for caching, proceeding without cache: %v", schemaId, err)
 		return cont, nil
 	}
 
-	cloned, err := cont.DeepClone()
-	if err != nil {
-		log.Printf("[WARN] Failed to clone fresh container for %s, returning original: %v", schemaId, err)
-		return cont, nil // Return original as fallback
-	}
-	return cloned, nil
+	c.Cache.Set(cacheKey, jsonBytes)
+	c.Cache.LogEventWithSize("SCHEMA_CACHED", schemaId)
+
+	return cont, nil // Return original (already parsed)
 }
 
 // InvalidateSchemaCache removes a schema from cache
