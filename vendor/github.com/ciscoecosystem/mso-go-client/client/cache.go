@@ -60,13 +60,13 @@ func (cache *Cache) Set(key string, value interface{}) {
 	} else {
 		// Create new item
 		cache.items[key] = &CacheItem{
-			Data:         value,
-			Size:         itemSize,
-			Hits:         0,
-			Misses:       0,
+			Data:          value,
+			Size:          itemSize,
+			Hits:          0,
+			Misses:        0,
 			Invalidations: 0,
-			CreatedAt:    now,
-			LastAccessAt: now,
+			CreatedAt:     now,
+			LastAccessAt:  now,
 		}
 	}
 
@@ -76,6 +76,9 @@ func (cache *Cache) Set(key string, value interface{}) {
 
 // Get atomically gets and clones an item with per-item statistics tracking
 func (cache *Cache) Get(key string, cloneFunc func(interface{}) (interface{}, error)) (interface{}, bool, error) {
+	// Get timestamp once to avoid multiple system calls
+	now := time.Now()
+
 	cache.mu.RLock()
 	item, found := cache.items[key]
 
@@ -85,11 +88,14 @@ func (cache *Cache) Get(key string, cloneFunc func(interface{}) (interface{}, er
 	if found && item.Data != nil {
 		// Clone while holding read lock - prevents race conditions
 		result, cloneErr = cloneFunc(item.Data)
-
-		// Update per-item statistics - hits
-		item.Hits++
-		item.LastAccessAt = time.Now()
 		cache.mu.RUnlock()
+
+		// Update per-item statistics with write lock to prevent race conditions
+		cache.mu.Lock()
+		item.Hits++
+		item.LastAccessAt = now
+		cache.mu.Unlock()
+
 		return result, true, cloneErr
 	}
 
@@ -100,39 +106,38 @@ func (cache *Cache) Get(key string, cloneFunc func(interface{}) (interface{}, er
 		// Placeholder entry exists but no actual data - still a miss
 		cache.mu.Lock()
 		item.Misses++
-		item.LastAccessAt = time.Now()
+		item.LastAccessAt = now
 		cache.mu.Unlock()
 	} else if !found {
 		// No entry exists at all - record miss
-		cache.recordMissForKey(key)
+		cache.recordMissForKey(key, now)
 	}
 
 	return nil, false, nil
 }
 
 // recordMissForKey records a cache miss for a key that doesn't exist yet
-func (cache *Cache) recordMissForKey(key string) {
-	// This is a bit tricky - we want to track misses per item, but the item doesn't exist yet
-	// We'll create a placeholder entry to track the miss, which will be updated when Set is called
+func (cache *Cache) recordMissForKey(key string, now time.Time) {
+	// Track misses per item, but the item doesn't exist yet
+	// Create a placeholder entry to track the miss, which will be updated when Set is called
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 
 	if _, exists := cache.items[key]; !exists {
 		// Create a temporary entry just to track the miss
-		now := time.Now()
 		cache.items[key] = &CacheItem{
-			Data:         nil, // No data yet
-			Size:         0,
-			Hits:         0,
-			Misses:       1, // Record the miss
+			Data:          nil, // No data yet
+			Size:          0,
+			Hits:          0,
+			Misses:        1, // Record the miss
 			Invalidations: 0,
-			CreatedAt:    now,
-			LastAccessAt: now,
+			CreatedAt:     now,
+			LastAccessAt:  now,
 		}
 	} else {
 		// Item was created between the RLock and Lock, just increment misses
 		cache.items[key].Misses++
-		cache.items[key].LastAccessAt = time.Now()
+		cache.items[key].LastAccessAt = now
 	}
 }
 
@@ -162,10 +167,7 @@ func (cache *Cache) GetItemStats(key string) (hits, misses, invalidations int64,
 		hits = item.Hits
 		misses = item.Misses
 		invalidations = item.Invalidations
-		total := hits + misses
-		if total > 0 {
-			hitRatio = float64(hits) / float64(total) * 100
-		}
+		hitRatio = calculateHitRatio(hits, misses)
 		found = true
 	}
 	return
@@ -182,10 +184,7 @@ func (cache *Cache) GetStats() (hits, misses, invalidations int64, hitRatio floa
 		invalidations += item.Invalidations
 	}
 
-	total := hits + misses
-	if total > 0 {
-		hitRatio = float64(hits) / float64(total) * 100
-	}
+	hitRatio = calculateHitRatio(hits, misses)
 	return
 }
 
@@ -195,7 +194,7 @@ func (cache *Cache) GetMemoryStats() (totalBytes int64, totalMB float64, avgByte
 	defer cache.mu.RUnlock()
 
 	totalBytes = cache.totalBytes
-	totalMB = float64(totalBytes) / (1024 * 1024)
+	totalMB = bytesToMB(totalBytes)
 
 	itemCount := len(cache.items)
 	if itemCount > 0 {
@@ -203,9 +202,7 @@ func (cache *Cache) GetMemoryStats() (totalBytes int64, totalMB float64, avgByte
 	}
 
 	// Get current system memory stats
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	systemMemoryMB = float64(m.Alloc) / (1024 * 1024)
+	systemMemoryMB = getSystemMemoryMB()
 
 	return
 }
@@ -214,7 +211,7 @@ func (cache *Cache) GetMemoryStats() (totalBytes int64, totalMB float64, avgByte
 func (cache *Cache) GetDetailedStats() (hits, misses, invalidations int64, hitRatio, cacheSizeMB, avgItemKB, systemMemoryMB float64) {
 	hits, misses, invalidations, hitRatio = cache.GetStats()
 	totalBytes, cacheSizeMB, avgItemBytes, systemMemoryMB := cache.GetMemoryStats()
-	avgItemKB = avgItemBytes / 1024
+	avgItemKB = bytesToKB(int64(avgItemBytes))
 	_ = totalBytes // Avoid unused variable
 	return
 }
@@ -242,29 +239,28 @@ func (cache *Cache) Clear() {
 
 // LogEvent logs cache events with per-item statistics
 func (cache *Cache) LogEvent(event, schemaId string) {
-	// Get per-item statistics
-	hits, misses, invalidations, hitRatio, found := cache.GetItemStats(schemaId)
-
-	if found {
-		// Get memory info for the specific item
-		cache.mu.RLock()
-		var itemSizeKB float64
-		if item, exists := cache.items[schemaId]; exists {
-			itemSizeKB = float64(item.Size) / 1024
-		}
+	// Get all data with single lock to avoid double locking
+	cache.mu.RLock()
+	item, exists := cache.items[schemaId]
+	if !exists || item == nil {
 		cache.mu.RUnlock()
-
-		// Get system memory for context
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		systemMemoryMB := float64(m.Alloc) / (1024 * 1024)
-
-		log.Printf("[DEBUG] %s for %s | ItemStats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%% | Size: %.1fKB | System: %.1fMB",
-			event, schemaId, hits, misses, invalidations, hitRatio, itemSizeKB, systemMemoryMB)
-	} else {
-		// Fallback for items that don't exist yet
 		log.Printf("[DEBUG] %s for %s | ItemStats: New item", event, schemaId)
+		return
 	}
+
+	// Get all data while holding single lock
+	hits := item.Hits
+	misses := item.Misses
+	invalidations := item.Invalidations
+	itemSizeKB := bytesToKB(item.Size)
+	cache.mu.RUnlock()
+
+	// Calculate derived values
+	hitRatio := calculateHitRatio(hits, misses)
+	systemMemoryMB := getSystemMemoryMB()
+
+	log.Printf("[DEBUG] %s for %s | ItemStats: Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%% | Size: %.1fKB | System: %.1fMB",
+		event, schemaId, hits, misses, invalidations, hitRatio, itemSizeKB, systemMemoryMB)
 }
 
 // LogEventWithSize logs cache events with detailed per-item size and memory information
@@ -273,12 +269,8 @@ func (cache *Cache) LogEventWithSize(event, schemaId string) {
 	defer cache.mu.RUnlock()
 
 	if item, exists := cache.items[schemaId]; exists {
-		itemSizeKB := float64(item.Size) / 1024
-
-		// Get system memory for context
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		systemMemoryMB := float64(m.Alloc) / (1024 * 1024)
+		itemSizeKB := bytesToKB(item.Size)
+		systemMemoryMB := getSystemMemoryMB()
 
 		log.Printf("[DEBUG] %s for %s | ItemSize: %.1fKB | Created: %s | LastAccess: %s | System: %.1fMB",
 			event, schemaId, itemSizeKB,
@@ -304,30 +296,31 @@ func (cache *Cache) LogMemoryReport() {
 		itemCount, cacheSizeMB, avgItemKB, systemMemoryMB, hits, misses, hitRatio, invalidations)
 }
 
-// GetAllItemStats returns statistics for all cached items (useful for debugging)
-func (cache *Cache) GetAllItemStats() map[string]map[string]interface{} {
-	cache.mu.RLock()
-	defer cache.mu.RUnlock()
+// Helper functions to reduce code duplication and improve performance
 
-	stats := make(map[string]map[string]interface{})
-
-	for key, item := range cache.items {
-		total := item.Hits + item.Misses
-		var hitRatio float64
-		if total > 0 {
-			hitRatio = float64(item.Hits) / float64(total) * 100
-		}
-
-		stats[key] = map[string]interface{}{
-			"hits":         item.Hits,
-			"misses":       item.Misses,
-			"invalidations": item.Invalidations,
-			"hitRatio":     hitRatio,
-			"sizeKB":       float64(item.Size) / 1024,
-			"createdAt":    item.CreatedAt,
-			"lastAccessAt": item.LastAccessAt,
-		}
+// calculateHitRatio calculates hit ratio percentage from hits and misses
+func calculateHitRatio(hits, misses int64) float64 {
+	total := hits + misses
+	if total > 0 {
+		return float64(hits) / float64(total) * 100
 	}
-
-	return stats
+	return 0
 }
+
+// getSystemMemoryMB returns current system memory usage in MB
+func getSystemMemoryMB() float64 {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return float64(m.Alloc) / (1024 * 1024)
+}
+
+// bytesToKB converts bytes to kilobytes
+func bytesToKB(bytes int64) float64 {
+	return float64(bytes) / 1024
+}
+
+// bytesToMB converts bytes to megabytes
+func bytesToMB(bytes int64) float64 {
+	return float64(bytes) / (1024 * 1024)
+}
+
