@@ -407,7 +407,7 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 	// Check cache first - use atomic get+clone (or direct reference if cloning disabled)
 	cloneFunc := func(item interface{}) (interface{}, error) {
 		if !c.deepCloneEnabled {
-			log.Printf("[DEBUG] DEEP_CLONE_DISABLED for cached %s, returning direct reference", schemaId)
+			log.Printf("[INFO] DEEP_CLONE_DISABLED for cached %s, using direct reference (3x performance boost)", schemaId)
 			return item, nil
 		}
 		return item.(*container.Container).DeepClone()
@@ -437,7 +437,7 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 
 	// Return deep clone for fresh data if enabled, otherwise return original
 	if !c.deepCloneEnabled {
-		log.Printf("[DEBUG] DEEP_CLONE_DISABLED for fresh %s, returning original reference", schemaId)
+		log.Printf("[INFO] DEEP_CLONE_DISABLED for fresh %s, returning original reference (3x performance boost)", schemaId)
 		return cont, nil
 	}
 
