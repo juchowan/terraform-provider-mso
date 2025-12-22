@@ -57,9 +57,8 @@ type Client struct {
 	backoffMinDelay    int
 	backoffMaxDelay    int
 	backoffDelayFactor float64
-	Cache              *Cache
-	cacheEnabled       bool
-	deepCloneEnabled   bool
+	Cache        *Cache
+	cacheEnabled bool
 }
 
 type CallbackRetryFunc func(*container.Container) bool
@@ -147,11 +146,6 @@ func CacheEnabled(enabled bool) Option {
 	}
 }
 
-func DeepCloneEnabled(enabled bool) Option {
-	return func(client *Client) {
-		client.deepCloneEnabled = enabled
-	}
-}
 
 func initClient(clientUrl, username string, options ...Option) *Client {
 	var transport *http.Transport
@@ -166,7 +160,6 @@ func initClient(clientUrl, username string, options ...Option) *Client {
 		httpClient:       http.DefaultClient,
 		maxReAuthRetries: 3,
 		Cache:            NewCache(),
-		deepCloneEnabled: true, // Default to enabled for backwards compatibility
 	}
 
 	for _, option := range options {
@@ -418,12 +411,6 @@ func (c *Client) GetSchemaWithCache(schemaId string) (*container.Container, erro
 
 		// Parse JSON directly from cached bytes - creates new Container (inherently thread-safe!)
 		jsonBytes := cached.([]byte)
-
-		if !c.deepCloneEnabled {
-			log.Printf("[INFO] DEEP_CLONE_DISABLED for cached %s, using shared reference (maximum performance)", schemaId)
-			// Even when "deep clone disabled", we still parse from JSON which creates new objects
-			// This is safer than true shared references but faster than explicit deep cloning
-		}
 
 		cont, err := container.ParseJSON(jsonBytes)
 		if err != nil {
