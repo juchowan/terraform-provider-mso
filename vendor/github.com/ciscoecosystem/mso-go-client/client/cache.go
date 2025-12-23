@@ -2,9 +2,10 @@ package client
 
 import (
 	"log"
+	"os"
 	"runtime"
+	"strings"
 	"sync"
-	"time"
 )
 
 // CacheItem represents a cached item with its own statistics
@@ -14,8 +15,6 @@ type CacheItem struct {
 	Hits          int64
 	Misses        int64
 	Invalidations int64
-	CreatedAt     time.Time
-	LastAccessAt  time.Time
 }
 
 // Cache provides thread-safe caching with per-item statistics tracking and memory monitoring
@@ -46,8 +45,6 @@ func (cache *Cache) Set(key string, value interface{}) {
 		itemSize = 1024 // Estimate 1KB for unknown types
 	}
 
-	now := time.Now()
-
 	// Update existing item or create new one
 	if existingItem, exists := cache.items[key]; exists {
 		// Remove old size from total
@@ -56,7 +53,6 @@ func (cache *Cache) Set(key string, value interface{}) {
 		// Update existing item, preserving statistics
 		existingItem.Data = value
 		existingItem.Size = itemSize
-		existingItem.LastAccessAt = now
 	} else {
 		// Create new item
 		cache.items[key] = &CacheItem{
@@ -65,8 +61,6 @@ func (cache *Cache) Set(key string, value interface{}) {
 			Hits:          0,
 			Misses:        0,
 			Invalidations: 0,
-			CreatedAt:     now,
-			LastAccessAt:  now,
 		}
 	}
 
@@ -76,8 +70,6 @@ func (cache *Cache) Set(key string, value interface{}) {
 
 // Get atomically gets and clones an item with per-item statistics tracking
 func (cache *Cache) Get(key string, cloneFunc func(interface{}) (interface{}, error)) (interface{}, bool, error) {
-	// Get timestamp once to avoid multiple system calls
-	now := time.Now()
 
 	cache.mu.RLock()
 	item, found := cache.items[key]
@@ -93,7 +85,6 @@ func (cache *Cache) Get(key string, cloneFunc func(interface{}) (interface{}, er
 		// Update per-item statistics with write lock to prevent race conditions
 		cache.mu.Lock()
 		item.Hits++
-		item.LastAccessAt = now
 		cache.mu.Unlock()
 
 		return result, true, cloneErr
@@ -106,18 +97,17 @@ func (cache *Cache) Get(key string, cloneFunc func(interface{}) (interface{}, er
 		// Placeholder entry exists but no actual data - still a miss
 		cache.mu.Lock()
 		item.Misses++
-		item.LastAccessAt = now
 		cache.mu.Unlock()
 	} else if !found {
 		// No entry exists at all - record miss
-		cache.recordMissForKey(key, now)
+		cache.recordMissForKey(key)
 	}
 
 	return nil, false, nil
 }
 
 // recordMissForKey records a cache miss for a key that doesn't exist yet
-func (cache *Cache) recordMissForKey(key string, now time.Time) {
+func (cache *Cache) recordMissForKey(key string) {
 	// Track misses per item, but the item doesn't exist yet
 	// Create a placeholder entry to track the miss, which will be updated when Set is called
 	cache.mu.Lock()
@@ -131,13 +121,10 @@ func (cache *Cache) recordMissForKey(key string, now time.Time) {
 			Hits:          0,
 			Misses:        1, // Record the miss
 			Invalidations: 0,
-			CreatedAt:     now,
-			LastAccessAt:  now,
 		}
 	} else {
 		// Item was created between the RLock and Lock, just increment misses
 		cache.items[key].Misses++
-		cache.items[key].LastAccessAt = now
 	}
 }
 
@@ -272,11 +259,8 @@ func (cache *Cache) LogEventWithSize(event, schemaId string) {
 		itemSizeKB := bytesToKB(item.Size)
 		systemMemoryMB := getSystemMemoryMB()
 
-		log.Printf("[DEBUG] %s for %s | ItemSize: %.1fKB | Created: %s | LastAccess: %s | System: %.1fMB",
-			event, schemaId, itemSizeKB,
-			item.CreatedAt.Format("15:04:05"),
-			item.LastAccessAt.Format("15:04:05"),
-			systemMemoryMB)
+		log.Printf("[DEBUG] %s for %s | ItemSize: %.1fKB | System: %.1fMB",
+			event, schemaId, itemSizeKB, systemMemoryMB)
 	}
 }
 
