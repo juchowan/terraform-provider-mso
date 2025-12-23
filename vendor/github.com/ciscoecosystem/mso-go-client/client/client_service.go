@@ -87,13 +87,6 @@ func (c *Client) GetViaURLWithCache(url string) (*container.Container, error) {
 	c.Cache.Set(cacheKey, jsonBytes)
 	c.Cache.LogEventWithSize(resourceType+"_CACHED", url)
 
-	// Log periodic memory reports every 10 cache operations
-	hits, misses, _, _ := c.Cache.GetStats()
-	totalOps := hits + misses
-	if totalOps%10 == 0 && totalOps > 0 {
-		c.Cache.LogMemoryReport()
-	}
-
 	return cont, nil // Return original (already parsed)
 }
 
