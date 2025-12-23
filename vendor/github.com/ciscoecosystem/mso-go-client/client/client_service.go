@@ -32,20 +32,15 @@ func (c *Client) GetViaURL(endpoint string) (*container.Container, error) {
 
 }
 
-// GetViaURLWithCache retrieves any URL with caching support
 func (c *Client) GetViaURLWithCache(url string) (*container.Container, error) {
-	// Skip cache if disabled - fall back to direct API call
 	if !c.cacheEnabled {
-		resourceType := c.detectURLResourceType(url)
-		log.Printf("[DEBUG] %s_CACHE_DISABLED for %s, fetching from API", resourceType, url)
 		return c.GetViaURL(url)
 	}
 
-	cacheKey := url // Simple URL-based cache key
+	cacheKey := url
 
-	// Check cache for raw JSON bytes
 	passthroughFunc := func(item interface{}) (interface{}, error) {
-		return item, nil // Just return the cached JSON bytes as-is
+		return item, nil
 	}
 
 	if cached, found, err := c.Cache.Get(cacheKey, passthroughFunc); found {
@@ -57,7 +52,6 @@ func (c *Client) GetViaURLWithCache(url string) (*container.Container, error) {
 		resourceType := c.detectURLResourceType(url)
 		c.Cache.LogEvent(resourceType+"_CACHE_HIT", url)
 
-		// Parse JSON directly from cached bytes - creates new Container (inherently thread-safe!)
 		jsonBytes := cached.([]byte)
 
 		cont, err := container.ParseJSON(jsonBytes)
@@ -77,7 +71,6 @@ func (c *Client) GetViaURLWithCache(url string) (*container.Container, error) {
 		return nil, err
 	}
 
-	// Store raw JSON bytes in cache for efficient future parsing
 	jsonBytes, err := json.Marshal(cont.Data())
 	if err != nil {
 		log.Printf("[WARN] Failed to marshal %s for caching, proceeding without cache: %v", url, err)
@@ -85,9 +78,9 @@ func (c *Client) GetViaURLWithCache(url string) (*container.Container, error) {
 	}
 
 	c.Cache.Set(cacheKey, jsonBytes)
-	c.Cache.LogEventWithSize(resourceType+"_CACHED", url)
+	c.Cache.LogEvent(resourceType+"_CACHED", url, true)
 
-	return cont, nil // Return original (already parsed)
+	return cont, nil
 }
 
 // detectURLResourceType detects resource type from URL for better logging and monitoring
