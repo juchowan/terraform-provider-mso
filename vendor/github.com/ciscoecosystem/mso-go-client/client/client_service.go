@@ -115,8 +115,6 @@ func (c *Client) detectURLResourceType(url string) string {
 func (c *Client) InvalidateURLCache(url string) {
 	// Skip cache operations if caching is disabled
 	if !c.cacheEnabled {
-		resourceType := c.detectURLResourceType(url)
-		log.Printf("[DEBUG] %s_CACHE_DISABLED, skipping invalidation for %s", resourceType, url)
 		return
 	}
 

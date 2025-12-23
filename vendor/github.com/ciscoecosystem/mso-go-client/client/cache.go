@@ -109,7 +109,7 @@ func (cache *Cache) Get(key string, cloneFunc func(interface{}) (interface{}, er
 
 		return nil, false, nil
 	} else {
-		// Use read lock when no statistics needed - better concurrency
+		// Use read lock when no statistics needed
 		cache.mu.RLock()
 		defer cache.mu.RUnlock()
 
@@ -123,7 +123,6 @@ func (cache *Cache) Get(key string, cloneFunc func(interface{}) (interface{}, er
 		return nil, false, nil
 	}
 }
-
 
 // Delete removes an item from the cache with per-item invalidation tracking.
 func (cache *Cache) Delete(key string) {
@@ -143,7 +142,6 @@ func (cache *Cache) Delete(key string) {
 		delete(cache.items, key)
 	}
 }
-
 
 // Clear removes all items from the cache
 func (cache *Cache) Clear() {
@@ -224,8 +222,6 @@ func (cache *Cache) LogOperation(event string) {
 	log.Printf("[DEBUG] %s | AggregateStats: Items=%d, Hits=%d, Misses=%d, Invalidations=%d, HitRatio=%.1f%% | Memory: Cache=%.2fMB, AvgItem=%.1fKB, System=%.1fMB",
 		event, itemCount, totalHits, totalMisses, totalInvalidations, hitRatio, cacheSizeMB, avgItemKB, systemMemoryMB)
 }
-
-// Helper functions to reduce code duplication and improve performance
 
 // calculateHitRatio calculates hit ratio percentage from hits and misses
 func calculateHitRatio(hits, misses int64) float64 {
