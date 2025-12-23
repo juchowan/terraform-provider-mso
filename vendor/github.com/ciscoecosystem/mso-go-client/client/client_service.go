@@ -78,7 +78,7 @@ func (c *Client) GetViaURLWithCache(url string) (*container.Container, error) {
 	}
 
 	// Check if another goroutine already cached this data (prevents redundant cache operations)
-	if cached, alreadyExists, _ := c.Cache.Get(cacheKey, passthroughFunc); !alreadyExists {
+	if _, alreadyExists, _ := c.Cache.Get(cacheKey, passthroughFunc); !alreadyExists {
 		c.Cache.Set(cacheKey, jsonBytes)
 		c.Cache.LogEvent(resourceType+"_CACHED", url, true)
 	} else {
