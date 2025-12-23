@@ -77,8 +77,14 @@ func (c *Client) GetViaURLWithCache(url string) (*container.Container, error) {
 		return cont, nil
 	}
 
-	c.Cache.Set(cacheKey, jsonBytes)
-	c.Cache.LogEvent(resourceType+"_CACHED", url, true)
+	// Check if another goroutine already cached this data (prevents redundant cache operations)
+	if cached, alreadyExists, _ := c.Cache.Get(cacheKey, passthroughFunc); !alreadyExists {
+		c.Cache.Set(cacheKey, jsonBytes)
+		c.Cache.LogEvent(resourceType+"_CACHED", url, true)
+	} else {
+		// Data was cached by another goroutine while we were fetching
+		log.Printf("[DEBUG] %s already cached by another goroutine for %s", resourceType, url)
+	}
 
 	return cont, nil
 }
