@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
+	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
@@ -84,7 +85,8 @@ func resourceMSOSchemaTemplateVrf() *schema.Resource {
 			"description": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
-				Computed: true,
+				// Computed: true,
+				// Computed is removed to allow the description to be removed
 			},
 
 			"site_aware_policy_enforcement": &schema.Schema{
@@ -96,7 +98,8 @@ func resourceMSOSchemaTemplateVrf() *schema.Resource {
 			"rendezvous_points": &schema.Schema{
 				Type:     schema.TypeSet,
 				Optional: true,
-				Computed: true,
+				// Computed: true,
+				// Computed is removed to allow the rendezvous_points to be deleted this is a change in behaviour.
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"ip_address": &schema.Schema{
@@ -317,85 +320,94 @@ func resourceMSOSchemaTemplateVrfUpdate(d *schema.ResourceData, m interface{}) e
 	log.Printf("[DEBUG] Schema Template Vrf: Beginning Creation")
 	msoClient := m.(*client.Client)
 
-	var schemaId string
-	if schema_id, ok := d.GetOk("schema_id"); ok {
-		schemaId = schema_id.(string)
-	}
+	schemaId := d.Get("schema_id").(string)
+	templateName := d.Get("template").(string)
+	vrfName := d.Get("name").(string)
 
-	var templateName string
-	if template, ok := d.GetOk("template"); ok {
-		templateName = template.(string)
-	}
+	updatePath := fmt.Sprintf("/templates/%s/vrfs/%s", templateName, vrfName)
+	payloadCont := container.New()
+	payloadCont.Array()
 
-	var Name string
-	if name, ok := d.GetOk("name"); ok {
-		Name = name.(string)
-	}
-
-	var displayName string
-	if display_name, ok := d.GetOk("display_name"); ok {
-		displayName = display_name.(string)
-	}
-
-	var l3m bool
-	if L3M, ok := d.GetOk("layer3_multicast"); ok {
-		l3m = L3M.(bool)
-	}
-
-	var vzany bool
-	if vzAny, ok := d.GetOk("vzany"); ok {
-		vzany = vzAny.(bool)
-	}
-
-	var ipDataPlaneLearning string
-	if ip_data_plane_learning, ok := d.GetOk("ip_data_plane_learning"); ok {
-		ipDataPlaneLearning = ip_data_plane_learning.(string)
-	}
-
-	var preferredGroup bool
-	if preferred_group, ok := d.GetOk("preferred_group"); ok {
-		preferredGroup = preferred_group.(bool)
-	}
-
-	var description string
-	if tempVar, ok := d.GetOk("description"); ok {
-		description = tempVar.(string)
-	}
-
-	var siteAwarePolicyEnforcementMode bool
-	if site_aware_policy_enforcement, ok := d.GetOk("site_aware_policy_enforcement"); ok {
-		siteAwarePolicyEnforcementMode = site_aware_policy_enforcement.(bool)
-	}
-
-	rendezvousPoints := make([]interface{}, 0, 1)
-	if val, ok := d.GetOk("rendezvous_points"); ok {
-		rp_list := val.(*schema.Set).List()
-		for _, val := range rp_list {
-
-			rpConfig := make(map[string]interface{})
-			rendezvousPoint := val.(map[string]interface{})
-			if rendezvousPoint["ip_address"] != "" {
-				rpConfig["ipAddress"] = fmt.Sprintf("%v", rendezvousPoint["ip_address"])
-			}
-			if rendezvousPoint["type"] != "" {
-				rpConfig["rpType"] = fmt.Sprintf("%v", rendezvousPoint["type"])
-			}
-			if rendezvousPoint["route_map_policy_multicast_uuid"] != "" {
-				rpConfig["mcastRtMapPolicyRef"] = fmt.Sprintf("%v", rendezvousPoint["route_map_policy_multicast_uuid"])
-			}
-			rendezvousPoints = append(rendezvousPoints, rpConfig)
+	if d.HasChange("display_name") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/displayName", updatePath), d.Get("display_name").(string))
+		if err != nil {
+			return err
 		}
 	}
 
-	schemaTemplateVrfApp := models.NewSchemaTemplateVrf("replace", fmt.Sprintf("/templates/%s/vrfs/%s", templateName, Name), Name, displayName, ipDataPlaneLearning, description, l3m, vzany, preferredGroup, siteAwarePolicyEnforcementMode, rendezvousPoints)
+	if d.HasChange("layer3_multicast") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/l3MCast", updatePath), d.Get("layer3_multicast").(bool))
+		if err != nil {
+			return err
+		}
+	}
 
-	_, err := msoClient.PatchbyID(fmt.Sprintf("api/v1/schemas/%s", schemaId), schemaTemplateVrfApp)
+	if d.HasChange("vzany") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/vzAnyEnabled", updatePath), d.Get("vzany").(bool))
+		if err != nil {
+			return err
+		}
+	}
+
+	if d.HasChange("ip_data_plane_learning") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/ipDataPlaneLearning", updatePath), d.Get("ip_data_plane_learning").(string))
+		if err != nil {
+			return err
+		}
+	}
+
+	if d.HasChange("preferred_group") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/preferredGroup", updatePath), d.Get("preferred_group").(bool))
+		if err != nil {
+			return err
+		}
+	}
+
+	if d.HasChange("description") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/description", updatePath), d.Get("description").(string))
+		if err != nil {
+			return err
+		}
+	}
+
+	if d.HasChange("site_aware_policy_enforcement") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/siteAwarePolicyEnforcementMode", updatePath), d.Get("site_aware_policy_enforcement").(bool))
+		if err != nil {
+			return err
+		}
+	}
+
+	if d.HasChange("rendezvous_points") {
+		rendezvousPoints := make([]interface{}, 0, 1)
+		if val, ok := d.GetOk("rendezvous_points"); ok {
+			rp_list := val.(*schema.Set).List()
+			for _, val := range rp_list {
+				rpConfig := make(map[string]interface{})
+				rendezvousPoint := val.(map[string]interface{})
+				if rendezvousPoint["ip_address"] != "" {
+					rpConfig["ipAddress"] = fmt.Sprintf("%v", rendezvousPoint["ip_address"])
+				}
+				if rendezvousPoint["type"] != "" {
+					rpConfig["rpType"] = fmt.Sprintf("%v", rendezvousPoint["type"])
+				}
+				if rendezvousPoint["route_map_policy_multicast_uuid"] != "" {
+					rpConfig["mcastRtMapPolicyRef"] = fmt.Sprintf("%v", rendezvousPoint["route_map_policy_multicast_uuid"])
+				}
+				rendezvousPoints = append(rendezvousPoints, rpConfig)
+			}
+		}
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/rpConfigs", updatePath), rendezvousPoints)
+		if err != nil {
+			return err
+		}
+	}
+
+	err := doPatchRequest(msoClient, fmt.Sprintf("api/v1/schemas/%s", schemaId), payloadCont)
 	if err != nil {
-		log.Println(err)
 		return err
 	}
 
-	d.SetId(fmt.Sprintf("%v", Name))
+	d.SetId(fmt.Sprintf("%v", vrfName))
 	log.Printf("[DEBUG] %s: Creation finished successfully", d.Id())
 
 	return resourceMSOSchemaTemplateVrfRead(d, m)

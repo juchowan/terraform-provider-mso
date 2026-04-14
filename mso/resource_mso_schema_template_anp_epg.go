@@ -58,7 +58,6 @@ func resourceMSOSchemaTemplateAnpEpg() *schema.Resource {
 			"bd_name": &schema.Schema{
 				Type:         schema.TypeString,
 				Optional:     true,
-				ForceNew:     true,
 				ValidateFunc: validation.StringLenBetween(0, 1000),
 			},
 			"bd_schema_id": &schema.Schema{
@@ -74,8 +73,7 @@ func resourceMSOSchemaTemplateAnpEpg() *schema.Resource {
 			"vrf_name": &schema.Schema{
 				Type:         schema.TypeString,
 				Optional:     true,
-				ForceNew:     true,
-				ValidateFunc: validation.StringLenBetween(1, 1000),
+				ValidateFunc: validation.StringLenBetween(0, 1000),
 			},
 			"vrf_schema_id": &schema.Schema{
 				Type:     schema.TypeString,
@@ -93,9 +91,8 @@ func resourceMSOSchemaTemplateAnpEpg() *schema.Resource {
 				Computed: true,
 			},
 			"description": &schema.Schema{
-				Type:         schema.TypeString,
-				Optional:     true,
-				ValidateFunc: validation.StringLenBetween(1, 128),
+				Type:     schema.TypeString,
+				Optional: true,
 			},
 			"useg_epg": &schema.Schema{
 				Type:     schema.TypeBool,
@@ -509,7 +506,8 @@ func resourceMSOSchemaTemplateAnpEpgRead(d *schema.ResourceData, m interface{}) 
 
 	if err != nil {
 		d.SetId("")
-		return err
+		log.Printf("[DEBUG] %s: EPG not found, removing from state", d.Id())
+		return nil
 	}
 
 	log.Printf("[DEBUG] %s: Read finished successfully", d.Id())
@@ -523,89 +521,140 @@ func resourceMSOSchemaTemplateAnpEpgUpdate(d *schema.ResourceData, m interface{}
 
 	schemaId := d.Get("schema_id").(string)
 	templateName := d.Get("template_name").(string)
-	Name := d.Get("name").(string)
-	displayName := d.Get("display_name").(string)
-	description := d.Get("description").(string)
+	anpName := d.Get("anp_name").(string)
+	epgName := d.Get("name").(string)
 
-	var intraEpg, vrf_schema_id, vrf_template_name, bd_schema_id, bd_template_name, epgType, access_type, deployment_type, service_type string
-	var uSegEpg, intersiteMulticasteSource, preferredGroup, proxyArp bool
-	cloudServiceEpgConfig := make(map[string]interface{})
+	updatePath := fmt.Sprintf("/templates/%s/anps/%s/epgs/%s", templateName, anpName, epgName)
+	payloadCont := container.New()
+	payloadCont.Array()
 
-	if intra_epg, ok := d.GetOk("intra_epg"); ok {
-		intraEpg = intra_epg.(string)
-	}
-	if useg_epg, ok := d.GetOk("useg_epg"); ok {
-		uSegEpg = useg_epg.(bool)
-	}
-	if intersite_multicast_source, ok := d.GetOk("intersite_multicast_source"); ok {
-		intersiteMulticasteSource = intersite_multicast_source.(bool)
-	}
-	if proxy_arp, ok := d.GetOk("proxy_arp"); ok {
-		proxyArp = proxy_arp.(bool)
-	}
-	if preferred_group, ok := d.GetOk("preferred_group"); ok {
-		preferredGroup = preferred_group.(bool)
-	}
-	if tempVar, ok := d.GetOk("vrf_schema_id"); ok {
-		vrf_schema_id = tempVar.(string)
-	} else {
-		vrf_schema_id = schemaId
-	}
-	if tempVar, ok := d.GetOk("vrf_template_name"); ok {
-		vrf_template_name = tempVar.(string)
-	} else {
-		vrf_template_name = templateName
-	}
-	if tempVar, ok := d.GetOk("bd_schema_id"); ok {
-		bd_schema_id = tempVar.(string)
-	} else {
-		bd_schema_id = schemaId
-	}
-	if tempVar, ok := d.GetOk("bd_template_name"); ok {
-		bd_template_name = tempVar.(string)
-	} else {
-		bd_template_name = templateName
-	}
-	if epg_type, ok := d.GetOk("epg_type"); ok {
-		epgType = epg_type.(string)
-	}
-	if accessType, ok := d.GetOk("access_type"); ok {
-		access_type = accessType.(string)
-	}
-	if deploymentType, ok := d.GetOk("deployment_type"); ok {
-		deployment_type = deploymentType.(string)
-	}
-	if serviceType, ok := d.GetOk("service_type"); ok {
-		service_type = serviceType.(string)
+	if d.HasChange("display_name") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/displayName", updatePath), d.Get("display_name").(string))
+		if err != nil {
+			return err
+		}
 	}
 
-	if epgType == "service" {
-		cloudServiceEpgConfig = getcloudServiceEpgConfig(d, access_type, deployment_type, service_type)
-	} else {
-		cloudServiceEpgConfig = nil
+	if d.HasChange("description") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/description", updatePath), d.Get("description").(string))
+		if err != nil {
+			return err
+		}
 	}
 
-	vrfRefMap := make(map[string]interface{})
-	if vrfName, ok := d.GetOk("vrf_name"); ok {
-		vrfRefMap["schemaId"] = vrf_schema_id
-		vrfRefMap["templateName"] = vrf_template_name
-		vrfRefMap["vrfName"] = vrfName
+	if d.HasChange("intra_epg") {
+		intraEpg := d.Get("intra_epg").(string)
+		if intraEpg == "" {
+			intraEpg = "unenforced"
+		}
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/intraEpg", updatePath), intraEpg)
+		if err != nil {
+			return err
+		}
 	}
 
-	bdRefMap := make(map[string]interface{})
-	if bdName, ok := d.GetOk("bd_name"); ok {
-		bdRefMap["schemaId"] = bd_schema_id
-		bdRefMap["templateName"] = bd_template_name
-		bdRefMap["bdName"] = bdName
+	if d.HasChange("useg_epg") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/uSegEpg", updatePath), d.Get("useg_epg").(bool))
+		if err != nil {
+			return err
+		}
 	}
 
-	anpEpgStruct := models.NewTemplateAnpEpg("replace", getPathFromId(d.Id()), Name, displayName, intraEpg, epgType, description, uSegEpg, intersiteMulticasteSource, preferredGroup, proxyArp, vrfRefMap, bdRefMap, cloudServiceEpgConfig)
+	if d.HasChange("intersite_multicast_source") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/mCastSource", updatePath), d.Get("intersite_multicast_source").(bool))
+		if err != nil {
+			return err
+		}
+	}
 
-	_, err := msoClient.PatchbyID(fmt.Sprintf("api/v1/schemas/%s", schemaId), anpEpgStruct)
+	if d.HasChange("proxy_arp") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/proxyArp", updatePath), d.Get("proxy_arp").(bool))
+		if err != nil {
+			return err
+		}
+	}
 
+	if d.HasChange("preferred_group") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/preferredGroup", updatePath), d.Get("preferred_group").(bool))
+		if err != nil {
+			return err
+		}
+	}
+
+	if d.HasChange("epg_type") || d.HasChange("access_type") || d.HasChange("deployment_type") || d.HasChange("service_type") {
+		cloudServiceEpgConfig := make(map[string]interface{})
+		if d.Get("epg_type").(string) == "service" {
+			cloudServiceEpgConfig = getcloudServiceEpgConfig(d, d.Get("access_type").(string), d.Get("deployment_type").(string), d.Get("service_type").(string))
+		} else {
+			cloudServiceEpgConfig = nil
+		}
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/cloudServiceEpgConfig", updatePath), cloudServiceEpgConfig)
+		if err != nil {
+			return err
+		}
+	}
+
+	if d.HasChange("vrf_schema_id") || d.HasChange("vrf_template_name") || d.HasChange("vrf_name") {
+		vrfName := d.Get("vrf_name").(string)
+		if vrfName != "" {
+			vrfSchemaId := d.Get("vrf_schema_id").(string)
+			if vrfSchemaId == "" {
+				vrfSchemaId = schemaId
+			}
+			vrfTemplateName := d.Get("vrf_template_name").(string)
+			if vrfTemplateName == "" {
+				vrfTemplateName = templateName
+			}
+			vrfRef := map[string]interface{}{
+				"schemaId":     vrfSchemaId,
+				"templateName": vrfTemplateName,
+				"vrfName":      vrfName,
+			}
+			err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/vrfRef", updatePath), vrfRef)
+			if err != nil {
+				return err
+			}
+		} else {
+			err := addPatchPayloadToContainer(payloadCont, "remove", fmt.Sprintf("%s/vrfRef", updatePath), nil)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	if d.HasChange("bd_schema_id") || d.HasChange("bd_template_name") || d.HasChange("bd_name") {
+		bdName := d.Get("bd_name").(string)
+		if bdName != "" {
+			bdSchemaId := d.Get("bd_schema_id").(string)
+			if bdSchemaId == "" {
+				bdSchemaId = schemaId
+			}
+			bdTemplateName := d.Get("bd_template_name").(string)
+			if bdTemplateName == "" {
+				bdTemplateName = templateName
+			}
+			bdRef := map[string]interface{}{
+				"schemaId":     bdSchemaId,
+				"templateName": bdTemplateName,
+				"bdName":       bdName,
+			}
+			err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/bdRef", updatePath), bdRef)
+			if err != nil {
+				return err
+			}
+		} else {
+			err := addPatchPayloadToContainer(payloadCont, "remove", fmt.Sprintf("%s/bdRef", updatePath), nil)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	err := doPatchRequest(msoClient, fmt.Sprintf("api/v1/schemas/%s", schemaId), payloadCont)
 	if err != nil {
 		return err
 	}
+
 	return resourceMSOSchemaTemplateAnpEpgRead(d, m)
 }
 

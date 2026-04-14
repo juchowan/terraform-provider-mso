@@ -42,7 +42,8 @@ func resourceMSOTenant() *schema.Resource {
 			"description": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
-				Computed: true,
+				// Commenting optional to allow description to be set to empty string
+				// Computed: true,
 			},
 
 			"orchestrator_only": &schema.Schema{

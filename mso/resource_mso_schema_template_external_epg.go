@@ -50,9 +50,10 @@ func resourceMSOTemplateExtenalepg() *schema.Resource {
 				Computed: true,
 			},
 			"display_name": &schema.Schema{
-				Type:         schema.TypeString,
-				Required:     true,
-				ForceNew:     true,
+				Type:     schema.TypeString,
+				Required: true,
+				// ForceNew:     true,
+				// Commented out ForceNew because else the resource is destroyed when changing a display name
 				ValidateFunc: validation.StringLenBetween(1, 1000),
 			},
 			"vrf_name": &schema.Schema{
@@ -80,40 +81,43 @@ func resourceMSOTemplateExtenalepg() *schema.Resource {
 				}, false),
 			},
 			"l3out_name": &schema.Schema{
-				Type:         schema.TypeString,
-				Optional:     true,
-				Computed:     true,
-				ValidateFunc: validation.StringLenBetween(1, 1000),
+				Type:     schema.TypeString,
+				Optional: true,
+				// Computed:     true,
+				// Commented out computed to allow l3out removal when not provided
+				ValidateFunc: validation.StringLenBetween(0, 1000),
 			},
 			"l3out_schema_id": &schema.Schema{
 				Type:         schema.TypeString,
 				Optional:     true,
 				Computed:     true,
-				ValidateFunc: validation.StringLenBetween(1, 1000),
+				ValidateFunc: validation.StringLenBetween(0, 1000),
 			},
 			"l3out_template_name": &schema.Schema{
 				Type:         schema.TypeString,
 				Optional:     true,
 				Computed:     true,
-				ValidateFunc: validation.StringLenBetween(1, 1000),
+				ValidateFunc: validation.StringLenBetween(0, 1000),
 			},
 			"anp_name": &schema.Schema{
-				Type:         schema.TypeString,
-				Optional:     true,
-				Computed:     true,
-				ValidateFunc: validation.StringLenBetween(1, 1000),
+				Type:     schema.TypeString,
+				Optional: true,
+				// Computed:     true,
+				// Commented out computed to allow anp removal when not provided
+				// ANP is not exposed in UI anymore for a long time so we should investigate deprecation
+				ValidateFunc: validation.StringLenBetween(0, 1000),
 			},
 			"anp_schema_id": &schema.Schema{
 				Type:         schema.TypeString,
 				Optional:     true,
 				Computed:     true,
-				ValidateFunc: validation.StringLenBetween(1, 1000),
+				ValidateFunc: validation.StringLenBetween(0, 1000),
 			},
 			"anp_template_name": &schema.Schema{
 				Type:         schema.TypeString,
 				Optional:     true,
 				Computed:     true,
-				ValidateFunc: validation.StringLenBetween(1, 1000),
+				ValidateFunc: validation.StringLenBetween(0, 1000),
 			},
 			"include_in_preferred_group": &schema.Schema{
 				Type:     schema.TypeBool,
@@ -141,7 +145,6 @@ func resourceMSOTemplateExtenalepg() *schema.Resource {
 			"description": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
-				Computed: true,
 			},
 		}),
 	}
@@ -602,57 +605,60 @@ func resourceMSOTemplateExtenalepgUpdate(d *schema.ResourceData, m interface{}) 
 	vrfRefMap["templateName"] = vrf_template_name
 	vrfRefMap["vrfName"] = vrfName
 
-	var l3outRefMap map[string]interface{}
-	if tempVar, ok := d.GetOk("l3out_name"); ok {
-		l3outName := tempVar.(string)
-		var l3outSchemaID, l3outTemplate string
-		if tmpVar, oki := d.GetOk("l3out_schema_id"); oki {
-			l3outSchemaID = tmpVar.(string)
-		} else {
-			l3outSchemaID = schemaID
-		}
-
-		if tpVar, okj := d.GetOk("l3out_template_name"); okj {
-			l3outTemplate = tpVar.(string)
-		} else {
-			l3outTemplate = templateName
-		}
-
-		l3outRefMap = make(map[string]interface{})
-
-		l3outRefMap["schemaId"] = l3outSchemaID
-		l3outRefMap["templateName"] = l3outTemplate
-		l3outRefMap["l3outName"] = l3outName
-
-	}
-
-	anpRefMap := make(map[string]interface{})
-	if aName, ok := d.GetOk("anp_name"); ok {
-		anpName := aName.(string)
-
-		var anpSchemaID, anpTemplateName string
-		if schID, ok := d.GetOk("anp_schema_id"); ok {
-			anpSchemaID = schID.(string)
-		} else {
-			anpSchemaID = schemaID
-		}
-
-		if tmpName, ok := d.GetOk("anp_template_name"); ok {
-			anpTemplateName = tmpName.(string)
-		} else {
-			anpTemplateName = templateName
-		}
-
-		anpRefMap["schemaId"] = anpSchemaID
-		anpRefMap["templateName"] = anpTemplateName
-		anpRefMap["anpName"] = anpName
-	} else {
-		anpRefMap = nil
-	}
-
-	platform := msoClient.GetPlatform()
-
 	if extEpgType == "cloud" {
+		// Intentially we do not change any of the cloud specific code because we do not support cloud apic anymore
+		// It is not impacting code having the functionality still around until there is more clarity on cloud cleanup
+		// Moved a few variables that are cloud specific inside of the conditional to make clearer they are not used by on-premise
+		platform := msoClient.GetPlatform()
+
+		var l3outRefMap map[string]interface{}
+		if tempVar, ok := d.GetOk("l3out_name"); ok {
+			l3outName := tempVar.(string)
+			var l3outSchemaID, l3outTemplate string
+			if tmpVar, oki := d.GetOk("l3out_schema_id"); oki {
+				l3outSchemaID = tmpVar.(string)
+			} else {
+				l3outSchemaID = schemaID
+			}
+
+			if tpVar, okj := d.GetOk("l3out_template_name"); okj {
+				l3outTemplate = tpVar.(string)
+			} else {
+				l3outTemplate = templateName
+			}
+
+			l3outRefMap = make(map[string]interface{})
+
+			l3outRefMap["schemaId"] = l3outSchemaID
+			l3outRefMap["templateName"] = l3outTemplate
+			l3outRefMap["l3outName"] = l3outName
+
+		}
+
+		anpRefMap := make(map[string]interface{})
+		if aName, ok := d.GetOk("anp_name"); ok {
+			anpName := aName.(string)
+
+			var anpSchemaID, anpTemplateName string
+			if schID, ok := d.GetOk("anp_schema_id"); ok {
+				anpSchemaID = schID.(string)
+			} else {
+				anpSchemaID = schemaID
+			}
+
+			if tmpName, ok := d.GetOk("anp_template_name"); ok {
+				anpTemplateName = tmpName.(string)
+			} else {
+				anpTemplateName = templateName
+			}
+
+			anpRefMap["schemaId"] = anpSchemaID
+			anpRefMap["templateName"] = anpTemplateName
+			anpRefMap["anpName"] = anpName
+		} else {
+			anpRefMap = nil
+		}
+
 		var selectorName string
 		if selName, ok := d.GetOk("selector_name"); ok {
 			selectorName = selName.(string)
@@ -747,13 +753,123 @@ func resourceMSOTemplateExtenalepgUpdate(d *schema.ResourceData, m interface{}) 
 		d.Partial(false)
 
 	} else {
-		path := fmt.Sprintf("/templates/%s/externalEpgs/%s", templateName, externalEpgName)
-		externalepgStruct := models.NewTemplateExternalepg("replace", path, externalEpgName, displayName, extEpgType, description, preferredGroup, vrfRefMap, l3outRefMap, anpRefMap, nil)
+		updatePath := fmt.Sprintf("/templates/%s/externalEpgs/%s", templateName, externalEpgName)
+		payloadCont := container.New()
+		payloadCont.Array()
 
-		_, err := msoClient.PatchbyID(fmt.Sprintf("api/v1/schemas/%s", schemaID), externalepgStruct)
+		// Always assure the extEpgType is set to on-premise because the update logic has in code defaults set when getOk fails
+		// This else part of the conditional will only be triggered for extEpgType != cloud so we should be able to safely set this
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/extEpgType", updatePath), extEpgType)
 		if err != nil {
 			return err
 		}
+
+		if d.HasChange("display_name") {
+			err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/displayName", updatePath), d.Get("display_name").(string))
+			if err != nil {
+				return err
+			}
+		}
+
+		if d.HasChange("description") {
+			err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/description", updatePath), d.Get("description").(string))
+			if err != nil {
+				return err
+			}
+		}
+
+		if d.HasChange("include_in_preferred_group") {
+			err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/preferredGroup", updatePath), d.Get("include_in_preferred_group").(bool))
+			if err != nil {
+				return err
+			}
+		}
+
+		if d.HasChange("vrf_schema_id") || d.HasChange("vrf_template_name") || d.HasChange("vrf_name") {
+			// Because VRF is a required a attribute the VRF will always be present
+			// Any change detection in VRF attributes will set "replace" as the static operation in the patch payload
+			err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/vrfRef", updatePath), vrfRefMap)
+			if err != nil {
+				return err
+			}
+		}
+
+		if d.HasChange("l3out_schema_id") || d.HasChange("l3out_template_name") || d.HasChange("l3out_name") {
+			l3outName := d.Get("l3out_name").(string)
+			if l3outName != "" {
+				l3outSchemaId := d.Get("l3out_schema_id").(string)
+				if l3outSchemaId == "" {
+					l3outSchemaId = schemaID
+				}
+				l3outTemplateName := d.Get("l3out_template_name").(string)
+				if l3outTemplateName == "" {
+					l3outTemplateName = templateName
+				}
+				l3outRef := map[string]interface{}{
+					"schemaId":     l3outSchemaId,
+					"templateName": l3outTemplateName,
+					"l3outName":    l3outName,
+				}
+
+				old, _ := d.GetChange("l3out_name")
+				operation := "replace"
+				if old == "" {
+					operation = "add"
+				}
+				err := addPatchPayloadToContainer(payloadCont, operation, fmt.Sprintf("%s/l3outRef", updatePath), l3outRef)
+				if err != nil {
+					return err
+				}
+			} else {
+				err := addPatchPayloadToContainer(payloadCont, "remove", fmt.Sprintf("%s/l3outRef", updatePath), nil)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		if d.HasChange("anp_schema_id") || d.HasChange("anp_template_name") || d.HasChange("anp_name") {
+			// ANP is not used in externalEPG, this might be some legacy config or day0 wrong config
+			// Decided based on the old anp behaviour to execute a replace when anpRefMap is created and anp name has been provided
+			// We should investigate removal of ANP from the resource
+			anpName := d.Get("anp_name").(string)
+			if anpName != "" {
+				anpSchemaId := d.Get("anp_schema_id").(string)
+				if anpSchemaId == "" {
+					anpSchemaId = schemaID
+				}
+				anpTemplateName := d.Get("anp_template_name").(string)
+				if anpTemplateName == "" {
+					anpTemplateName = templateName
+				}
+				anpRef := map[string]interface{}{
+					"schemaId":     anpSchemaId,
+					"templateName": anpTemplateName,
+					"anpName":      anpName,
+				}
+
+				old, _ := d.GetChange("anp_name")
+				operation := "replace"
+				if old == "" {
+					operation = "add"
+				}
+				err := addPatchPayloadToContainer(payloadCont, operation, fmt.Sprintf("%s/anpRef", updatePath), anpRef)
+				if err != nil {
+					return err
+				}
+			} else {
+				err := addPatchPayloadToContainer(payloadCont, "remove", fmt.Sprintf("%s/anpRef", updatePath), nil)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		err = doPatchRequest(msoClient, fmt.Sprintf("api/v1/schemas/%s", schemaID), payloadCont)
+		if err != nil {
+			return err
+		}
+
 	}
 	return resourceMSOTemplateExtenalepgRead(d, m)
 }

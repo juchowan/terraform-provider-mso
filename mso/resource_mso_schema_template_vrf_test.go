@@ -99,6 +99,39 @@ func TestAccMSOSchemaTemplateVrfResource(t *testing.T) {
 					),
 				),
 			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Update Schema Template VRF by removing all RPs")
+				},
+				Config: testAccMSOSchemaTemplateVrfConfigUpdateRemoveAllRps(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "name", "tf_test_schema_template_vrf"),
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "display_name", "tf_test_schema_template_vrf"),
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "ip_data_plane_learning", "enabled"),
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "description", "Terraform test Schema Template VRF with Layer3 Multicast"),
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "vzany", "false"),
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "preferred_group", "false"),
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "site_aware_policy_enforcement", "false"),
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "layer3_multicast", "true"),
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "rendezvous_points.#", "0"),
+				),
+			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Update Schema Template VRF by removing description")
+				},
+				Config: testAccMSOSchemaTemplateVrfConfigUpdateRemoveDescription(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "name", "tf_test_schema_template_vrf"),
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "display_name", "tf_test_schema_template_vrf"),
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "description", ""),
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "ip_data_plane_learning", "enabled"),
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "vzany", "false"),
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "preferred_group", "false"),
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "site_aware_policy_enforcement", "false"),
+					resource.TestCheckResourceAttr("mso_schema_template_vrf.schema_template_vrf", "layer3_multicast", "true"),
+				),
+			},
 		},
 		CheckDestroy: testCheckResourceDestroyPolicyWithArguments("mso_schema_template_vrf", "vrf"),
 	})
@@ -197,5 +230,37 @@ func testAccMSOSchemaTemplateVrfConfigUpdateRemovingExtraRp() string {
 			type                            = "static"
 			route_map_policy_multicast_uuid = mso_tenant_policies_route_map_policy_multicast.route_map_policy_multicast.uuid
 		}
+	}`, testAccMSOSchemaTemplateForVrfConfig())
+}
+
+func testAccMSOSchemaTemplateVrfConfigUpdateRemoveAllRps() string {
+	return fmt.Sprintf(`%s
+	resource "mso_schema_template_vrf" "schema_template_vrf" {
+		schema_id                     = mso_schema.schema_for_vrf.id
+		template                      = tolist(mso_schema.schema_for_vrf.template)[0].name
+		name                          = "tf_test_schema_template_vrf"
+		display_name                  = "tf_test_schema_template_vrf"
+		description                   = "Terraform test Schema Template VRF with Layer3 Multicast"
+		ip_data_plane_learning        = "enabled"
+		vzany                         = false
+		preferred_group               = false
+		site_aware_policy_enforcement = false
+		layer3_multicast              = true
+	}`, testAccMSOSchemaTemplateForVrfConfig())
+}
+
+func testAccMSOSchemaTemplateVrfConfigUpdateRemoveDescription() string {
+	return fmt.Sprintf(`%s
+	resource "mso_schema_template_vrf" "schema_template_vrf" {
+		schema_id                     = mso_schema.schema_for_vrf.id
+		template                      = tolist(mso_schema.schema_for_vrf.template)[0].name
+		name                          = "tf_test_schema_template_vrf"
+		display_name                  = "tf_test_schema_template_vrf"
+		description                   = ""
+		ip_data_plane_learning        = "enabled"
+		vzany                         = false
+		preferred_group               = false
+		site_aware_policy_enforcement = false
+		layer3_multicast              = true
 	}`, testAccMSOSchemaTemplateForVrfConfig())
 }

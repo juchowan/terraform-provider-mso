@@ -186,20 +186,30 @@ func (c *Client) configProxy(transport *http.Transport) *http.Transport {
 }
 
 func (c *Client) useInsecureHTTPClient(insecure bool) *http.Transport {
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			CipherSuites: []uint16{
-				tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-				tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-				tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
-				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			},
-			PreferServerCipherSuites: true,
-			InsecureSkipVerify:       insecure,
-			MinVersion:               tls.VersionTLS11,
-			MaxVersion:               tls.VersionTLS13,
+	// Clone http.DefaultTransport instead of mutating the global default,
+	// preventing side effects on other HTTP clients in the same process
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+
+	// Increase from the default (2) to 32, ensuring Terraform's default
+	// parallelism of 10 concurrent operations can reuse idle
+	// connections instead of repeatedly opening new ones
+	transport.MaxIdleConnsPerHost = 32
+	transport.TLSClientConfig = &tls.Config{
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
 		},
+		PreferServerCipherSuites: true,
+		InsecureSkipVerify:       insecure,
+		// Enable TLS client session caching to allow TLS session ticket resumption,
+		// avoiding the overhead of TLS handshake for subsequent requests to the
+		// same server.
+		ClientSessionCache: tls.NewLRUClientSessionCache(0),
+		MinVersion:         tls.VersionTLS11,
+		MaxVersion:         tls.VersionTLS13,
 	}
 
 	return transport

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
+	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
 
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
@@ -45,10 +46,10 @@ func resourceMSOSchemaTemplate() *schema.Resource {
 				ValidateFunc: validation.StringLenBetween(1, 1000),
 			},
 			"description": &schema.Schema{
-				Type:         schema.TypeString,
-				Optional:     true,
-				Computed:     true,
-				ValidateFunc: validation.StringLenBetween(1, 1000),
+				Type:     schema.TypeString,
+				Optional: true,
+				// Computed: true,
+				// Computed is removed to allow the description to be removed
 			},
 			"display_name": &schema.Schema{
 				Type:         schema.TypeString,
@@ -186,22 +187,31 @@ func resourceMSOSchemaTemplateUpdate(d *schema.ResourceData, m interface{}) erro
 	schemaId := d.Get("schema_id").(string)
 	name := d.Get("name").(string)
 
-	if d.HasChange("display_name") || d.HasChange("description") {
-		tenantId := d.Get("tenant_id").(string)
-		displayName := d.Get("display_name").(string)
-		description := d.Get("description").(string)
-		templateType := getTemplateType(d.Get("template_type").(string))
-		templateSubType := getTemplateSubType(d.Get("template_type").(string))
-		schematemplate := models.NewSchemaTemplate("replace", fmt.Sprintf("/templates/%s", name), tenantId, name, displayName, description, templateType, templateSubType)
+	updatePath := fmt.Sprintf("/templates/%s", name)
+	payloadCont := container.New()
+	payloadCont.Array()
 
-		_, err := msoClient.PatchbyID(fmt.Sprintf("api/v1/schemas/%s", schemaId), schematemplate)
+	if d.HasChange("display_name") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/displayName", updatePath), d.Get("display_name").(string))
 		if err != nil {
 			return err
 		}
-
-		d.SetId(fmt.Sprintf("%v", name))
-		log.Printf("[DEBUG] %s: Creation finished successfully", d.Id())
 	}
+
+	if d.HasChange("description") {
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/description", updatePath), d.Get("description").(string))
+		if err != nil {
+			return err
+		}
+	}
+
+	err := doPatchRequest(msoClient, fmt.Sprintf("api/v1/schemas/%s", schemaId), payloadCont)
+	if err != nil {
+		return err
+	}
+
+	d.SetId(fmt.Sprintf("%v", name))
+	log.Printf("[DEBUG] %s: Creation finished successfully", d.Id())
 
 	return resourceMSOSchemaTemplateRead(d, m)
 }

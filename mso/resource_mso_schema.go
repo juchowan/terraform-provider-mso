@@ -34,10 +34,11 @@ func resourceMSOSchema() *schema.Resource {
 				ValidateFunc: validation.StringLenBetween(1, 1000),
 			},
 			"description": &schema.Schema{
-				Type:         schema.TypeString,
-				Optional:     true,
-				Computed:     true,
-				ValidateFunc: validation.StringLenBetween(1, 1000),
+				Type:     schema.TypeString,
+				Optional: true,
+				// Commenting optional to allow description to be set to empty string
+				// Computed: true,
+				ValidateFunc: validation.StringLenBetween(0, 1000),
 			},
 			"template_name": &schema.Schema{
 				Type:         schema.TypeString,
@@ -67,10 +68,10 @@ func resourceMSOSchema() *schema.Resource {
 							ValidateFunc: validation.StringLenBetween(1, 1000),
 						},
 						"description": &schema.Schema{
-							Type:         schema.TypeString,
-							Optional:     true,
-							Computed:     true,
-							ValidateFunc: validation.StringLenBetween(1, 1000),
+							Type:     schema.TypeString,
+							Optional: true,
+							// Computed:     true,
+							ValidateFunc: validation.StringLenBetween(0, 1000),
 						},
 						"tenant_id": &schema.Schema{
 							Type:         schema.TypeString,

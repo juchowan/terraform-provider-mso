@@ -1,105 +1,193 @@
 package mso
 
+// Note: User association tests are skipped because the mso_user data source uses
+// api/v1/users (or api/v2/users on ND), which no longer works on ND 4.1+ where
+// the endpoint changed to /api/v1/infra/aaa/localUsers.
+//
+// Note: Cloud site association tests (AWS/Azure/GCP) are skipped because they
+// require real cloud account credentials and vendor-specific configuration that
+// is not available in the standard test environment.
+
 import (
 	"fmt"
 	"testing"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
-	"github.com/ciscoecosystem/mso-go-client/container"
-	"github.com/ciscoecosystem/mso-go-client/models"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 )
 
-func TestAccMsoTenant_Basic(t *testing.T) {
-	var s TenantTest
+// msoTenantId is used to capture the tenant ID from the first test step for use in the manual delete/recreate step.
+var msoTenantId string
+
+func TestAccMSOTenantResource(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckMsoTenantDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCheckMsoTenantConfig_basic("Mso123"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMsoTenantExists("mso_tenant.tenant1", &s),
-					testAccCheckMsoTenantAttributes("Mso123", &s),
+				PreConfig: func() { fmt.Println("Test: Create Tenant") },
+				Config:    testAccMSOTenantConfigCreate(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "name", msoTenantName),
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "display_name", msoTenantName),
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "description", "Terraform test tenant"),
+					// Capture the tenant ID for the manual delete/recreate step.
+					func(s *terraform.State) error {
+						rs, ok := s.RootModule().Resources["mso_tenant.tenant"]
+						if !ok {
+							return fmt.Errorf("mso_tenant.tenant not found in state")
+						}
+						msoTenantId = rs.Primary.ID
+						return nil
+					},
+				),
+			},
+			{
+				PreConfig: func() { fmt.Println("Test: Update Tenant basic fields") },
+				Config:    testAccMSOTenantConfigUpdateBasicFields(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "name", msoTenantName),
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "display_name", msoTenantName+" updated"),
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "description", "Terraform test tenant updated"),
+				),
+			},
+			{
+				PreConfig: func() { fmt.Println("Test: Remove Tenant description") },
+				Config:    testAccMSOTenantConfigRemoveDescription(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "name", msoTenantName),
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "display_name", msoTenantName+" updated"),
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "description", ""),
+				),
+			},
+			{
+				PreConfig:         func() { fmt.Println("Test: Import Tenant") },
+				ResourceName:      "mso_tenant.tenant",
+				ImportState:       true,
+				ImportStateVerify: true,
+				// orchestrator_only is client-side only (controls delete behavior) and is not returned by the API.
+				ImportStateVerifyIgnore: []string{"orchestrator_only"},
+			},
+			{
+				PreConfig: func() { fmt.Println("Test: Add site association") },
+				Config:    testAccMSOTenantConfigAddSiteAssociation(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "name", msoTenantName),
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "site_associations.#", "1"),
+				),
+			},
+			{
+				PreConfig: func() { fmt.Println("Test: Add extra site association") },
+				Config:    testAccMSOTenantConfigAddExtraSiteAssociation(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "name", msoTenantName),
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "site_associations.#", "2"),
+				),
+			},
+			{
+				PreConfig: func() { fmt.Println("Test: Remove extra site association") },
+				Config:    testAccMSOTenantConfigRemoveSiteAssociation(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "name", msoTenantName),
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "site_associations.#", "1"),
+				),
+			},
+			{
+				PreConfig:         func() { fmt.Println("Test: Import Tenant with site associations") },
+				ResourceName:      "mso_tenant.tenant",
+				ImportState:       true,
+				ImportStateVerify: true,
+				// orchestrator_only is client-side only (controls delete behavior) and is not returned by the API.
+				ImportStateVerifyIgnore: []string{"orchestrator_only"},
+			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Verify recreation of manually deleted Tenant")
+					client := testAccProvider.Meta().(*client.Client)
+					err := client.DeletebyId("api/v1/tenants/" + msoTenantId)
+					if err != nil {
+						panic(fmt.Sprintf("Failed to delete tenant %s via API: %s", msoTenantId, err))
+					}
+				},
+				Config: testAccMSOTenantConfigCreate(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "name", msoTenantName),
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "display_name", msoTenantName),
+					resource.TestCheckResourceAttr("mso_tenant.tenant", "description", "Terraform test tenant"),
 				),
 			},
 		},
 	})
 }
 
-func TestAccMsoTenant_Update(t *testing.T) {
-	var s TenantTest
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckMsoTenantDestroy,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccCheckMsoTenantConfig_basic("Mso123"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMsoTenantExists("mso_tenant.tenant1", &s),
-					testAccCheckMsoTenantAttributes("Mso123", &s),
-				),
-			},
-			{
-				Config: testAccCheckMsoTenantConfig_basic("Mso234"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMsoTenantExists("mso_tenant.tenant1", &s),
-					testAccCheckMsoTenantAttributes("Mso234", &s),
-				),
-			},
-		},
-	})
-}
-
-func testAccCheckMsoTenantConfig_basic(name string) string {
+func testAccMSOTenantConfigCreate() string {
 	return fmt.Sprintf(`
-	resource "mso_tenant" "tenant1" {
-		name = "%v"
-		display_name = "%v"
-	  }
-	`, name, name)
+	resource "mso_tenant" "tenant" {
+		name         = "%s"
+		display_name = "%s"
+		description  = "Terraform test tenant"
+	}`, msoTenantName, msoTenantName)
 }
 
-func testAccCheckMsoTenantExists(tenantName string, st *TenantTest) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		rs1, err1 := s.RootModule().Resources[tenantName]
-
-		if !err1 {
-			return fmt.Errorf("Tenant record %s not found", tenantName)
-		}
-		if rs1.Primary.ID == "" {
-			return fmt.Errorf("No Tenant record id was set")
-		}
-
-		client := testAccProvider.Meta().(*client.Client)
-
-		resp, err := client.GetViaURL("api/v1/tenants/" + rs1.Primary.ID)
-
-		if err != nil {
-			return err
-		}
-
-		tp, _ := tenantfromcontainer(resp)
-
-		*st = *tp
-		return nil
-	}
+func testAccMSOTenantConfigUpdateBasicFields() string {
+	return fmt.Sprintf(`
+	resource "mso_tenant" "tenant" {
+		name         = "%s"
+		display_name = "%s updated"
+		description  = "Terraform test tenant updated"
+	}`, msoTenantName, msoTenantName)
 }
 
-func tenantfromcontainer(con *container.Container) (*TenantTest, error) {
-
-	s := TenantTest{}
-	s.Name = models.StripQuotes(con.S("name").String())
-	s.DisplayName = models.StripQuotes(con.S("display_name").String())
-	s.Description = models.StripQuotes(con.S("description").String())
-
-	return &s, nil
+func testAccMSOTenantConfigRemoveDescription() string {
+	return fmt.Sprintf(`
+	resource "mso_tenant" "tenant" {
+		name         = "%s"
+		display_name = "%s updated"
+	}`, msoTenantName, msoTenantName)
 }
 
+func testAccMSOTenantConfigAddSiteAssociation() string {
+	return fmt.Sprintf(`%s
+	resource "mso_tenant" "tenant" {
+		name         = "%s"
+		display_name = "%s updated"
+		site_associations {
+			site_id = data.mso_site.%s.id
+		}
+	}`, testSiteConfigAnsibleTest(), msoTenantName, msoTenantName, msoTemplateSiteName1)
+}
+
+func testAccMSOTenantConfigAddExtraSiteAssociation() string {
+	return fmt.Sprintf(`%s%s
+	resource "mso_tenant" "tenant" {
+		name         = "%s"
+		display_name = "%s updated"
+		site_associations {
+			site_id = data.mso_site.%s.id
+		}
+		site_associations {
+			site_id = data.mso_site.%s.id
+		}
+	}`, testSiteConfigAnsibleTest(), testSiteConfigAnsibleTest2(), msoTenantName, msoTenantName, msoTemplateSiteName1, msoTemplateSiteName2)
+}
+
+func testAccMSOTenantConfigRemoveSiteAssociation() string {
+	return fmt.Sprintf(`%s
+	resource "mso_tenant" "tenant" {
+		name         = "%s"
+		display_name = "%s updated"
+		site_associations {
+			site_id = data.mso_site.%s.id
+		}
+	}`, testSiteConfigAnsibleTest(), msoTenantName, msoTenantName, msoTemplateSiteName1)
+}
+
+// testAccCheckMsoTenantDestroy verifies that the tenant is deleted from MSO.
+// The generic testCheckResourceDestroyPolicy helpers cannot be used here because
+// they query the policy/template API (api/v1/templates/objects), whereas tenants
+// use a separate API endpoint (api/v1/tenants).
 func testAccCheckMsoTenantDestroy(s *terraform.State) error {
 	client := testAccProvider.Meta().(*client.Client)
 
@@ -115,21 +203,4 @@ func testAccCheckMsoTenantDestroy(s *terraform.State) error {
 		}
 	}
 	return nil
-}
-func testAccCheckMsoTenantAttributes(name string, st *TenantTest) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		if name != st.Name {
-			return fmt.Errorf("Bad Tenant Name %s", st.Name)
-		}
-		return nil
-	}
-}
-
-type TenantTest struct {
-	Id          string        `json:",omitempty"`
-	Name        string        `json:",omitempty"`
-	DisplayName string        `json:",omitempty"`
-	Description string        `json:",omitempty"`
-	Users       []interface{} `json:",omitempty"`
-	Sites       []interface{} `json:",omitempty"`
 }

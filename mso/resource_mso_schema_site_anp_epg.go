@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
+	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
@@ -56,6 +57,8 @@ func resourceMSOSchemaSiteAnpEpg() *schema.Resource {
 				ValidateFunc: validation.StringLenBetween(1, 1000),
 			},
 			"private_link_label": &schema.Schema{
+				// cloud feature should be investigated further
+				// see https://www.cisco.com/c/en/us/td/docs/dcn/mso/use-case/configuring-service-epgs-in-cisco-aci-multi-site-orchestrator.html
 				Type:     schema.TypeString,
 				Optional: true,
 			},
@@ -289,24 +292,31 @@ func resourceMSOSchemaSiteAnpEpgUpdate(d *schema.ResourceData, m interface{}) er
 	anpName := d.Get("anp_name").(string)
 	epgName := d.Get("epg_name").(string)
 
-	anpEpgRefMap := make(map[string]interface{})
-	anpEpgRefMap["schemaId"] = schemaId
-	anpEpgRefMap["templateName"] = templateName
-	anpEpgRefMap["anpName"] = anpName
-	anpEpgRefMap["epgName"] = epgName
+	updatePath := fmt.Sprintf("/sites/%s-%s/anps/%s/epgs/%s", siteId, templateName, anpName, epgName)
+	payloadCont := container.New()
+	payloadCont.Array()
 
-	path := fmt.Sprintf("/sites/%s-%s/anps/%s/epgs/%s", siteId, templateName, anpName, epgName)
-
-	privateLinkLabel := make(map[string]interface{})
-	if val, ok := d.GetOk("private_link_label"); ok {
-		map_private_link_label := make(map[string]interface{})
-		map_private_link_label["name"] = val
-		privateLinkLabel = map_private_link_label
-	} else {
-		privateLinkLabel = nil
+	if d.HasChange("private_link_label") {
+		// when a epg is not of type service the privateLinkLabel can still be set in the site while being a service type attribute
+		// this could cause a change trigger wiping site configuration even for application type epg when attribute is changed
+		// unsupported in NaC https://github.com/netascode/terraform-mso-nac-ndo/blob/main/ndo_schemas.tf#L1024
+		// changing the PATCH to avoid removal regardless of epg type
+		oldPrivateLinkLabel, newPrivateLinkLabel := d.GetChange("private_link_label")
+		operation := "replace"
+		if oldPrivateLinkLabel == "" {
+			operation = "add"
+		}
+		privateLinkLabelMap := make(map[string]interface{})
+		if newPrivateLinkLabel != "" {
+			privateLinkLabelMap["name"] = newPrivateLinkLabel
+		}
+		err := addPatchPayloadToContainer(payloadCont, operation, fmt.Sprintf("%s/privateLinkLabel", updatePath), privateLinkLabelMap)
+		if err != nil {
+			return err
+		}
 	}
-	anpEpgStruct := models.NewSchemaSiteAnpEpg("replace", path, privateLinkLabel, anpEpgRefMap)
-	_, err := msoClient.PatchbyID(fmt.Sprintf("api/v1/schemas/%s", schemaId), anpEpgStruct)
+
+	err := doPatchRequest(msoClient, fmt.Sprintf("api/v1/schemas/%s", schemaId), payloadCont)
 	if err != nil {
 		return err
 	}
