@@ -1,10 +1,12 @@
 package client
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/url"
+	"strings"
 
 	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
@@ -28,6 +30,105 @@ func (c *Client) GetViaURL(endpoint string) (*container.Container, error) {
 	}
 	return obj, CheckForErrors(obj, "GET")
 
+}
+
+func (c *Client) GetViaURLWithCache(url string) (*container.Container, error) {
+	if !c.cacheEnabled {
+		return c.GetViaURL(url)
+	}
+
+	cacheKey := url
+
+	passthroughFunc := func(item interface{}) (interface{}, error) {
+		return item, nil
+	}
+
+	if cached, found, err := c.Cache.Get(cacheKey, passthroughFunc); found {
+		if err != nil {
+			log.Printf("[WARN] Cache error for %s, fetching fresh: %v", url, err)
+			return c.GetViaURL(url)
+		}
+
+		resourceType := c.detectURLResourceType(url)
+		c.Cache.LogEvent(resourceType+"_CACHE_HIT", url)
+
+		jsonBytes := cached.([]byte)
+
+		cont, err := container.ParseJSON(jsonBytes)
+		if err != nil {
+			log.Printf("[WARN] Failed to parse cached JSON for %s, fetching fresh: %v", url, err)
+			return c.GetViaURL(url)
+		}
+		return cont, nil
+	}
+
+	resourceType := c.detectURLResourceType(url)
+	c.Cache.LogEvent(resourceType+"_CACHE_MISS", url)
+
+	// Cache miss - fetch from API
+	cont, err := c.GetViaURL(url)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonBytes, err := json.Marshal(cont.Data())
+	if err != nil {
+		log.Printf("[WARN] Failed to marshal %s for caching, proceeding without cache: %v", url, err)
+		return cont, nil
+	}
+
+	// Check if another goroutine already cached this data (prevents redundant cache operations)
+	if _, alreadyExists, _ := c.Cache.Get(cacheKey, passthroughFunc); !alreadyExists {
+		c.Cache.Set(cacheKey, jsonBytes)
+		c.Cache.LogEvent(resourceType+"_CACHED", url, true)
+	} else {
+		// Data was cached by another goroutine while we were fetching
+		log.Printf("[DEBUG] %s already cached by another goroutine for %s", resourceType, url)
+	}
+
+	return cont, nil
+}
+
+// detectURLResourceType detects resource type from URL for better logging and monitoring
+func (c *Client) detectURLResourceType(url string) string {
+	// Detect common MSO resource types from URL patterns
+	if strings.Contains(url, "/schemas/") {
+		return "SCHEMA"
+	}
+	if strings.Contains(url, "/templates/") {
+		return "TEMPLATE"
+	}
+	if strings.Contains(url, "/sites/") {
+		return "SITE"
+	}
+	if strings.Contains(url, "/users/") {
+		return "USER"
+	}
+	if strings.Contains(url, "/tenants/") {
+		return "TENANT"
+	}
+	if strings.Contains(url, "/labels/") {
+		return "LABEL"
+	}
+	if strings.Contains(url, "/remote-locations/") {
+		return "REMOTE_LOCATION"
+	}
+	// Generic fallback for unknown resource types
+	return "RESOURCE"
+}
+
+// InvalidateURLCache removes a URL from cache
+func (c *Client) InvalidateURLCache(url string) {
+	// Skip cache operations if caching is disabled
+	if !c.cacheEnabled {
+		return
+	}
+
+	cacheKey := url // URL-based cache key
+	c.Cache.Delete(cacheKey)
+
+	resourceType := c.detectURLResourceType(url)
+	c.Cache.LogEvent(resourceType+"_CACHE_INVALIDATED", url)
 }
 
 func (c *Client) GetPlatform() string {

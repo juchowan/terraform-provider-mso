@@ -101,7 +101,7 @@ func resourceMSOSchemaTemplateAnpEpgSubnetImport(d *schema.ResourceData, m inter
 	import_split := import_attribute.FindStringSubmatch(d.Id())
 	get_attribute := strings.Split(d.Id(), "/")
 	schemaId := get_attribute[0]
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	cont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	if err != nil {
 		return nil, err
 	}
@@ -283,6 +283,9 @@ func resourceMSOSchemaTemplateAnpEpgSubnetCreate(d *schema.ResourceData, m inter
 		return err
 	}
 
+	// Invalidate cache after schema modification
+	msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+
 	d.SetId(fmt.Sprintf("%v", ip))
 	log.Printf("[DEBUG] %s: Creation finished successfully", d.Id())
 
@@ -350,7 +353,7 @@ func resourceMSOSchemaTemplateAnpEpgSubnetUpdate(d *schema.ResourceData, m inter
 		noDefaultGateway = tempVar.(bool)
 	}
 
-	conts, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	conts, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	if err != nil {
 		return err
 	}
@@ -374,6 +377,8 @@ func resourceMSOSchemaTemplateAnpEpgSubnetUpdate(d *schema.ResourceData, m inter
 		return err
 	}
 
+	// Invalidate cache after schema modification
+	msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	d.SetId(fmt.Sprintf("%v", ip))
 	log.Printf("[DEBUG] %s: Updating finished successfully", d.Id())
 
@@ -384,7 +389,7 @@ func resourceMSOSchemaTemplateAnpEpgSubnetRead(d *schema.ResourceData, m interfa
 	log.Printf("[DEBUG] %s: Beginning Read", d.Id())
 	msoClient := m.(*client.Client)
 	schemaId := d.Get("schema_id").(string)
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	cont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	if err != nil {
 		return errorForObjectNotFound(err, d.Id(), cont, d)
 	}
@@ -509,7 +514,7 @@ func resourceMSOSchemaTemplateAnpEpgSubnetDelete(d *schema.ResourceData, m inter
 	anpName := d.Get("anp_name").(string)
 	epgName := d.Get("epg_name").(string)
 	id := d.Id()
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	cont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	if err != nil {
 		return err
 	}
@@ -530,6 +535,8 @@ func resourceMSOSchemaTemplateAnpEpgSubnetDelete(d *schema.ResourceData, m inter
 		return errs
 	}
 
+	// Invalidate cache after schema modification
+	msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	log.Printf("[DEBUG] %s: Destroy finished successfully", d.Id())
 
 	d.SetId("")

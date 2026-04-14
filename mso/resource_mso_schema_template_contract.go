@@ -464,8 +464,10 @@ func resourceMSOTemplateContractImport(d *schema.ResourceData, m interface{}) ([
 	schemaId := splitImport[0]
 	templateName := splitImport[2]
 	contractName := splitImport[4]
-	schemaCont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	schemaCont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	if err != nil {
+		log.Printf("[DEBUG] Clearing schema cache due to API error: %v", err)
+		msoClient.ClearCache()
 		return nil, err
 	}
 	err = setContractFromSchema(d, schemaCont, schemaId, templateName, contractName)
@@ -510,6 +512,8 @@ func resourceMSOTemplateContractCreate(d *schema.ResourceData, m interface{}) er
 	if err != nil {
 		return err
 	}
+	// Invalidate schema cache after modification
+	msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	log.Printf("[DEBUG] %s: Create finished successfully", d.Id())
 	return resourceMSOTemplateContractRead(d, m)
 }
@@ -520,8 +524,10 @@ func resourceMSOTemplateContractRead(d *schema.ResourceData, m interface{}) erro
 	schemaId := d.Get("schema_id").(string)
 	templateName := d.Get("template_name").(string)
 	contractName := d.Get("contract_name").(string)
-	schemaCont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	schemaCont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	if err != nil {
+		log.Printf("[DEBUG] Clearing schema cache due to API error: %v", err)
+		msoClient.ClearCache()
 		return errorForObjectNotFound(err, d.Id(), schemaCont, d)
 	}
 	err = setContractFromSchema(d, schemaCont, schemaId, templateName, contractName)
@@ -644,6 +650,8 @@ func resourceMSOTemplateContractUpdate(d *schema.ResourceData, m interface{}) er
 	if err != nil {
 		return err
 	}
+	// Invalidate schema cache after modification
+	msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 
 	return resourceMSOTemplateContractRead(d, m)
 }
@@ -656,6 +664,8 @@ func resourceMSOTemplateContractDelete(d *schema.ResourceData, m interface{}) er
 	if err != nil && !(response.Exists("code") && response.S("code").String() == "141") {
 		return err
 	}
+	// Invalidate schema cache after modification
+	msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", d.Get("schema_id").(string)))
 	d.SetId("")
 	log.Printf("[DEBUG] Delete finished successfully")
 	return nil

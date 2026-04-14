@@ -84,7 +84,7 @@ func resourceMSOTemplateAnpEpgContractImport(d *schema.ResourceData, m interface
 	msoClient := m.(*client.Client)
 	get_attribute := strings.Split(d.Id(), "/")
 	schemaId := get_attribute[0]
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	cont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	if err != nil {
 		return nil, err
 	}
@@ -213,6 +213,9 @@ func resourceMSOTemplateAnpEpgContractCreate(d *schema.ResourceData, m interface
 	if err != nil {
 		return err
 	}
+
+	// Invalidate cache after schema modification
+	msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 	return resourceMSOTemplateAnpEpgContractRead(d, m)
 }
 
@@ -223,7 +226,7 @@ func resourceMSOTemplateAnpEpgContractRead(d *schema.ResourceData, m interface{}
 
 	schemaId := d.Get("schema_id").(string)
 
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	cont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	if err != nil {
 		return errorForObjectNotFound(err, d.Id(), cont, d)
 	}
@@ -339,7 +342,7 @@ func resourceMSOTemplateAnpEpgContractUpdate(d *schema.ResourceData, m interface
 	contractRefMap["contractName"] = contractName
 
 	id := d.Id()
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaID))
+	cont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 	if err != nil {
 		return err
 	}
@@ -359,6 +362,9 @@ func resourceMSOTemplateAnpEpgContractUpdate(d *schema.ResourceData, m interface
 	if errs != nil {
 		return errs
 	}
+
+	// Invalidate cache after schema modification
+	msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 	return resourceMSOTemplateAnpEpgContractRead(d, m)
 }
 
@@ -394,7 +400,7 @@ func resourceMSOTemplateAnpEpgContractDelete(d *schema.ResourceData, m interface
 	contractRefMap["contractName"] = contractName
 
 	id := d.Id()
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaID))
+	cont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 	if err != nil {
 		return err
 	}
@@ -417,6 +423,9 @@ func resourceMSOTemplateAnpEpgContractDelete(d *schema.ResourceData, m interface
 	if errs != nil && !(response.Exists("code") && response.S("code").String() == "141") {
 		return errs
 	}
+
+	// Invalidate cache after schema modification
+	msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 	d.SetId("")
 	return resourceMSOTemplateAnpEpgContractRead(d, m)
 }

@@ -152,7 +152,7 @@ func resourceMSOTemplateExtenalepgImport(d *schema.ResourceData, m interface{}) 
 	msoClient := m.(*client.Client)
 	get_attribute := strings.Split(d.Id(), "/")
 	schemaId := get_attribute[0]
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	cont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	if err != nil {
 		return nil, err
 	}
@@ -429,6 +429,9 @@ func resourceMSOTemplateExtenalepgCreate(d *schema.ResourceData, m interface{}) 
 		if err != nil {
 			return err
 		}
+
+		// Invalidate cache after schema modification
+		msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 		d.Partial(false)
 
 	} else {
@@ -439,6 +442,9 @@ func resourceMSOTemplateExtenalepgCreate(d *schema.ResourceData, m interface{}) 
 		if err != nil {
 			return err
 		}
+
+		// Invalidate cache after schema modification
+		msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 	}
 	return resourceMSOTemplateExtenalepgRead(d, m)
 }
@@ -450,7 +456,7 @@ func resourceMSOTemplateExtenalepgRead(d *schema.ResourceData, m interface{}) er
 
 	schemaId := d.Get("schema_id").(string)
 
-	cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+	cont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 	if err != nil {
 		return errorForObjectNotFound(err, d.Id(), cont, d)
 	}
@@ -717,7 +723,7 @@ func resourceMSOTemplateExtenalepgUpdate(d *schema.ResourceData, m interface{}) 
 			siteEpgMap["externalEpgRef"] = epgRefMap
 			siteEpgMap["l3outDn"] = "l3out"
 
-			cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaID))
+			cont, err := msoClient.GetViaURLWithCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 			if err != nil {
 				return err
 			}
@@ -744,6 +750,9 @@ func resourceMSOTemplateExtenalepgUpdate(d *schema.ResourceData, m interface{}) 
 		if err1 != nil {
 			return err1
 		}
+
+		// Invalidate cache after schema modification
+		msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 		d.Partial(false)
 
 	} else {
@@ -754,6 +763,9 @@ func resourceMSOTemplateExtenalepgUpdate(d *schema.ResourceData, m interface{}) 
 		if err != nil {
 			return err
 		}
+
+		// Invalidate cache after schema modification
+		msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 	}
 	return resourceMSOTemplateExtenalepgRead(d, m)
 }
@@ -923,6 +935,9 @@ func resourceMSOTemplateExtenalepgDelete(d *schema.ResourceData, m interface{}) 
 			return err
 		}
 
+		// Invalidate cache after schema modification
+		msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
+
 	} else {
 		path := fmt.Sprintf("/templates/%s/externalEpgs/%s", templateName, externalEpgName)
 		externalepgStruct := models.NewTemplateExternalepg("remove", path, externalEpgName, displayName, extEpgType, description, preferredGroup, vrfRefMap, l3outRefMap, anpRefMap, nil)
@@ -933,6 +948,9 @@ func resourceMSOTemplateExtenalepgDelete(d *schema.ResourceData, m interface{}) 
 		if err != nil && !(response.Exists("code") && response.S("code").String() == "141") {
 			return err
 		}
+
+		// Invalidate cache after schema modification
+		msoClient.InvalidateURLCache(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 	}
 	d.SetId("")
 	return nil

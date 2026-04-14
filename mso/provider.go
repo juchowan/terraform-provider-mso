@@ -65,6 +65,12 @@ func Provider() terraform.ResourceProvider {
 				DefaultFunc: schema.EnvDefaultFunc("MSO_RETRIES", nil),
 				Description: "Number of retries for REST API calls. Defaults to 2.",
 			},
+			"enable_cache": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				DefaultFunc: schema.EnvDefaultFunc("MSO_ENABLE_CACHE", false),
+				Description: "Enable schema caching for improved performance. Defaults to false (disabled).",
+			},
 		},
 
 		ResourcesMap: map[string]*schema.Resource{
@@ -213,13 +219,14 @@ func Provider() terraform.ResourceProvider {
 
 func configureClient(d *schema.ResourceData) (interface{}, error) {
 	config := Config{
-		Username:   d.Get("username").(string),
-		Password:   d.Get("password").(string),
-		URL:        d.Get("url").(string),
-		IsInsecure: d.Get("insecure").(bool),
-		ProxyUrl:   d.Get("proxy_url").(string),
-		Domain:     d.Get("domain").(string),
-		Platform:   d.Get("platform").(string),
+		Username:    d.Get("username").(string),
+		Password:    d.Get("password").(string),
+		URL:         d.Get("url").(string),
+		IsInsecure:  d.Get("insecure").(bool),
+		ProxyUrl:    d.Get("proxy_url").(string),
+		Domain:      d.Get("domain").(string),
+		Platform:    d.Get("platform").(string),
+		EnableCache: d.Get("enable_cache").(bool),
 	}
 
 	config.MaxRetries = 2
@@ -258,7 +265,7 @@ func (c Config) Valid() error {
 func (c Config) getClient() interface{} {
 	if c.Password != "" {
 
-		return client.GetClient(c.URL, c.Username, client.Password(c.Password), client.Insecure(c.IsInsecure), client.ProxyUrl(c.ProxyUrl), client.Domain(c.Domain), client.Platform(c.Platform), client.MaxRetries(c.MaxRetries))
+		return client.GetClient(c.URL, c.Username, client.Password(c.Password), client.Insecure(c.IsInsecure), client.ProxyUrl(c.ProxyUrl), client.Domain(c.Domain), client.Platform(c.Platform), client.MaxRetries(c.MaxRetries), client.CacheEnabled(c.EnableCache))
 
 	}
 	return nil
@@ -266,12 +273,13 @@ func (c Config) getClient() interface{} {
 
 // Config
 type Config struct {
-	Username   string
-	Password   string
-	IsInsecure bool
-	ProxyUrl   string
-	URL        string
-	Domain     string
-	Platform   string
-	MaxRetries int
+	Username    string
+	Password    string
+	IsInsecure  bool
+	ProxyUrl    string
+	URL         string
+	Domain      string
+	Platform    string
+	MaxRetries  int
+	EnableCache bool
 }
