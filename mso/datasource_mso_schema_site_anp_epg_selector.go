@@ -1,3 +1,7 @@
+// NOTE: Acceptance tests for this data source are intentionally not provided.
+// Exercising this data source requires a cloud site (AWS/Azure/GCP) attached
+// to the MSO/ND test fabric, which is not part of the CI test environment.
+
 package mso
 
 import (
@@ -6,13 +10,14 @@ import (
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func datasourceMSOSchemaSiteAnpEpgSelector() *schema.Resource {
 	return &schema.Resource{
-		Read: datasourceSchemaSiteApnEpgSelectorRead,
+		DeprecationMessage: cloudDeprecationMessage("mso_schema_site_anp_epg_selector"),
+		Read:               datasourceSchemaSiteApnEpgSelectorRead,
 
 		Schema: map[string]*schema.Schema{
 			"schema_id": &schema.Schema{

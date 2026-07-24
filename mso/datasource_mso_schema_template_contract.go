@@ -5,8 +5,8 @@ import (
 	"log"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func dataSourceMSOTemplateContract() *schema.Resource {
@@ -91,22 +91,8 @@ func dataSourceMSOTemplateContract() *schema.Resource {
 			"filter_relationships": {
 				Type:     schema.TypeMap,
 				Computed: true,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"filter_schema_id": &schema.Schema{
-							Type:     schema.TypeString,
-							Computed: true,
-						},
-						"filter_template_name": &schema.Schema{
-							Type:     schema.TypeString,
-							Computed: true,
-						},
-						"filter_name": &schema.Schema{
-							Type:     schema.TypeString,
-							Computed: true,
-						},
-					},
-				},
+				// SDKv2 does not support Elem with schema.Resource on TypeMap fields.
+				// Expected keys: "filter_schema_id" (string), "filter_template_name" (string), "filter_name" (string). Validation skipped - field is deprecated.
 			},
 			"directives": {
 				Type:     schema.TypeList,

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 )
 
 func TestAccMSOMacsecPolicyDataSource(t *testing.T) {
@@ -30,7 +30,6 @@ func TestAccMSOMacsecPolicyDataSource(t *testing.T) {
 					customTestCheckResourceTypeSetAttr("data.mso_fabric_policies_macsec_policy.macsec_policy", "macsec_keys",
 						map[string]string{
 							"key_name":   "abc123",
-							"psk":        "AA111111111111111111111111111111111111111111111111111111111111aa",
 							"start_time": "2027-09-23 00:00:00",
 							"end_time":   "2030-09-23 00:00:00",
 						},

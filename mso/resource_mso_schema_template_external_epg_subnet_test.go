@@ -6,187 +6,286 @@ import (
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
-func TestAccMSOSchemaTemplateExternalepgSubnet_Basic(t *testing.T) {
-	var ss TemplateExternalepgSubnet
+// msoSchemaTemplateExtEpgSubnetSchemaId is set during the first test step's Check to capture the dynamic schema ID for use in the manual deletion PreConfig step.
+var msoSchemaTemplateExtEpgSubnetSchemaId string
+
+func TestAccMSOSchemaTemplateExternalEpgSubnetResource(t *testing.T) {
+	resourceName := "mso_schema_template_external_epg_subnet." + msoSchemaTemplateExtEpgName + "_subnet"
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckMSOSchemaTemplateExternalepgSubnetDestroy,
+		CheckDestroy: testAccCheckMSOSchemaTemplateExtEpgSubnetDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCheckMSOTemplateExternalepgSubnetConfig_basic("sub1"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMSOSchemaTemplateExternalepgSubnetExists("mso_schema_template_external_epg_subnet.subnet1", &ss),
-					testAccCheckMSOSchemaTemplateExternalepgSubnetAttributes("sub1", &ss),
+				PreConfig: func() { fmt.Println("Test: Create External EPG Subnet with required ip only") },
+				Config:    testAccMSOSchemaTemplateExtEpgSubnetConfigCreate(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet(resourceName, "schema_id"),
+					resource.TestCheckResourceAttr(resourceName, "template_name", msoSchemaTemplateName),
+					resource.TestCheckResourceAttr(resourceName, "external_epg_name", msoSchemaTemplateExtEpgName),
+					resource.TestCheckResourceAttr(resourceName, "ip", msoSchemaTemplateExtEpgSubnetIp),
+					resource.TestCheckResourceAttr(resourceName, "name", ""),
+					// Verify defaults when scope and aggregate are not set in config:
+					// scope is Computed so it reflects the server-side default (empty list);
+					// aggregate is not Computed so it defaults to an empty list.
+					resource.TestCheckResourceAttr(resourceName, "scope.#", "0"),
+					resource.TestCheckResourceAttr(resourceName, "aggregate.#", "0"),
+					// Capture the dynamic schema ID from state for use in the manual deletion PreConfig step
+					func(s *terraform.State) error {
+						rs, ok := s.RootModule().Resources[resourceName]
+						if !ok {
+							return fmt.Errorf("External EPG Subnet resource not found in state")
+						}
+						msoSchemaTemplateExtEpgSubnetSchemaId = rs.Primary.Attributes["schema_id"]
+						return nil
+					},
 				),
 			},
-		},
-	})
-}
-
-func TestAccMSOSchemaTemplateExternalepgSubnet_Update(t *testing.T) {
-	var ss TemplateExternalepgSubnet
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckMSOSchemaTemplateExternalepgSubnetDestroy,
-		Steps: []resource.TestStep{
 			{
-				Config: testAccCheckMSOTemplateExternalepgSubnetConfig_basic("sub1"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMSOSchemaTemplateExternalepgSubnetExists("mso_schema_template_external_epg_subnet.subnet1", &ss),
-					testAccCheckMSOSchemaTemplateExternalepgSubnetAttributes("sub1", &ss),
+				PreConfig: func() { fmt.Println("Test: Add External EPG Subnet name") },
+				Config:    testAccMSOSchemaTemplateExtEpgSubnetConfigWithName(msoSchemaTemplateExtEpgSubnetName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "ip", msoSchemaTemplateExtEpgSubnetIp),
+					resource.TestCheckResourceAttr(resourceName, "name", msoSchemaTemplateExtEpgSubnetName),
 				),
 			},
 			{
-				Config: testAccCheckMSOTemplateExternalepgSubnetConfig_basic("sub2"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMSOSchemaTemplateExternalepgSubnetExists("mso_schema_template_external_epg_subnet.subnet1", &ss),
-					testAccCheckMSOSchemaTemplateExternalepgSubnetAttributes("sub2", &ss),
+				PreConfig: func() { fmt.Println("Test: Update External EPG Subnet name") },
+				Config:    testAccMSOSchemaTemplateExtEpgSubnetConfigWithName(msoSchemaTemplateExtEpgSubnetName2),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "ip", msoSchemaTemplateExtEpgSubnetIp),
+					resource.TestCheckResourceAttr(resourceName, "name", msoSchemaTemplateExtEpgSubnetName2),
 				),
 			},
-		},
-	})
-}
-
-func testAccCheckMSOTemplateExternalepgSubnetConfig_basic(name string) string {
-	return fmt.Sprintf(`
-	resource "mso_schema_template_external_epg_subnet" "subnet1" {
-		schema_id = "5ea809672c00003bc40a2799"
-		template_name = "Template1"
-		external_epg_name =  "UntitledExternalEPG1"
-		ip = "10.101.100.0/25"
-		name = "%v"
-		scope = ["shared-rtctrl"]
-		aggregate = ["shared-rtctrl"]
-	  }
-`, name)
-}
-
-func testAccCheckMSOSchemaTemplateExternalepgSubnetExists(externalepgName string, ss *TemplateExternalepgSubnet) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*client.Client)
-		rs1, err1 := s.RootModule().Resources[externalepgName]
-
-		if !err1 {
-			return fmt.Errorf("External Epg Subnet %s not found", externalepgName)
-		}
-		if rs1.Primary.ID == "" {
-			return fmt.Errorf("No Schema id was set")
-		}
-
-		cont, err := client.GetViaURL("api/v1/schemas/5ea809672c00003bc40a2799")
-		if err != nil {
-			return err
-		}
-		count, err := cont.ArrayCount("templates")
-		if err != nil {
-			return fmt.Errorf("No Template found")
-		}
-		tp := TemplateExternalepgSubnet{}
-		found := false
-		for i := 0; i < count; i++ {
-			tempCont, err := cont.ArrayElement(i, "templates")
-			if err != nil {
-				return err
-			}
-
-			apiTemplate := models.StripQuotes(tempCont.S("name").String())
-			if apiTemplate == "Template1" {
-				externalepgCount, err := tempCont.ArrayCount("externalEpgs")
-				if err != nil {
-					return fmt.Errorf("Unable to get External Epg list")
-				}
-				for j := 0; j < externalepgCount; j++ {
-					externalepgCont, err := tempCont.ArrayElement(j, "externalEpgs")
+			{
+				PreConfig: func() { fmt.Println("Test: Set External EPG Subnet scope") },
+				Config:    testAccMSOSchemaTemplateExtEpgSubnetConfigWithScope(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "ip", msoSchemaTemplateExtEpgSubnetIp),
+					resource.TestCheckResourceAttr(resourceName, "name", msoSchemaTemplateExtEpgSubnetName2),
+					resource.TestCheckResourceAttr(resourceName, "scope.#", "2"),
+					resource.TestCheckResourceAttr(resourceName, "scope.0", "import-rtctrl"),
+					resource.TestCheckResourceAttr(resourceName, "scope.1", "export-rtctrl"),
+				),
+			},
+			{
+				PreConfig: func() { fmt.Println("Test: Set External EPG Subnet aggregate (with required shared-rtctrl scope)") },
+				Config:    testAccMSOSchemaTemplateExtEpgSubnetConfigWithAggregate(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "ip", msoSchemaTemplateExtEpgSubnetIp),
+					resource.TestCheckResourceAttr(resourceName, "scope.#", "1"),
+					resource.TestCheckResourceAttr(resourceName, "scope.0", "shared-rtctrl"),
+					resource.TestCheckResourceAttr(resourceName, "aggregate.#", "1"),
+					resource.TestCheckResourceAttr(resourceName, "aggregate.0", "shared-rtctrl"),
+				),
+			},
+			{
+				PreConfig: func() { fmt.Println("Test: Update External EPG Subnet scope and aggregate") },
+				Config:    testAccMSOSchemaTemplateExtEpgSubnetConfigWithScopeAndAggregateUpdated(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "ip", msoSchemaTemplateExtEpgSubnetIp),
+					resource.TestCheckResourceAttr(resourceName, "scope.#", "2"),
+					resource.TestCheckResourceAttr(resourceName, "scope.0", "shared-rtctrl"),
+					resource.TestCheckResourceAttr(resourceName, "scope.1", "export-rtctrl"),
+					resource.TestCheckResourceAttr(resourceName, "aggregate.#", "2"),
+					resource.TestCheckResourceAttr(resourceName, "aggregate.0", "shared-rtctrl"),
+					resource.TestCheckResourceAttr(resourceName, "aggregate.1", "export-rtctrl"),
+				),
+			},
+			{
+				PreConfig: func() { fmt.Println("Test: Clear External EPG Subnet aggregate with empty list") },
+				Config:    testAccMSOSchemaTemplateExtEpgSubnetConfigWithAggregateEmpty(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "ip", msoSchemaTemplateExtEpgSubnetIp),
+					resource.TestCheckResourceAttr(resourceName, "scope.#", "2"),
+					resource.TestCheckResourceAttr(resourceName, "scope.0", "shared-rtctrl"),
+					resource.TestCheckResourceAttr(resourceName, "scope.1", "export-rtctrl"),
+					resource.TestCheckResourceAttr(resourceName, "aggregate.#", "0"),
+				),
+			},
+			{
+				PreConfig: func() { fmt.Println("Test: Recreate External EPG Subnet on ip change (ForceNew)") },
+				Config:    testAccMSOSchemaTemplateExtEpgSubnetConfigUpdateIp(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "ip", msoSchemaTemplateExtEpgSubnetIp2),
+				),
+			},
+			{
+				PreConfig:    func() { fmt.Println("Test: Import External EPG Subnet") },
+				ResourceName: resourceName,
+				ImportState:  true,
+				ImportStateIdFunc: func(s *terraform.State) (string, error) {
+					rs, ok := s.RootModule().Resources[resourceName]
+					if !ok {
+						return "", fmt.Errorf("External EPG Subnet resource not found in state")
+					}
+					return fmt.Sprintf("%s/templates/%s/externalEpgs/%s/ip/%s",
+						rs.Primary.Attributes["schema_id"],
+						rs.Primary.Attributes["template_name"],
+						rs.Primary.Attributes["external_epg_name"],
+						rs.Primary.Attributes["ip"]), nil
+				},
+				ImportStateVerify: true,
+			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Recreate External EPG Subnet after manual deletion from NDO")
+					msoClient := testAccProvider.Meta().(*client.Client)
+					subnetRemovePatchPayload := models.GetRemovePatchPayload(fmt.Sprintf("/templates/%s/externalEpgs/%s/subnets/0", msoSchemaTemplateName, msoSchemaTemplateExtEpgName))
+					_, err := msoClient.PatchbyID(fmt.Sprintf("api/v1/schemas/%s", msoSchemaTemplateExtEpgSubnetSchemaId), subnetRemovePatchPayload)
 					if err != nil {
-						return err
+						t.Fatalf("Failed to manually delete External EPG Subnet: %v", err)
 					}
-					apiExternalepg := models.StripQuotes(externalepgCont.S("name").String())
-					if apiExternalepg == "UntitledExternalEPG1" {
-						subnetCount, err := externalepgCont.ArrayCount("subnets")
-						if err != nil {
-							return fmt.Errorf("Unable to get Subnets list")
-						}
-						for k := 0; k < subnetCount; k++ {
-							subnetsCont, err := externalepgCont.ArrayElement(k, "subnets")
-							if err != nil {
-								return err
-							}
-							apiIP := models.StripQuotes(subnetsCont.S("ip").String())
-							if apiIP == "10.101.100.0/25" {
-								tp.ip = apiIP
-								tp.name = models.StripQuotes(subnetsCont.S("name").String())
-							}
-						}
-						found = true
-						break
-					}
-				}
-			}
-		}
-		if !found {
-			return fmt.Errorf("External Epg Subnet not found from API")
-		}
-
-		tp1 := &tp
-		*ss = *tp1
-		return nil
-	}
+				},
+				Config: testAccMSOSchemaTemplateExtEpgSubnetConfigUpdateIp(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceName, "ip", msoSchemaTemplateExtEpgSubnetIp2),
+				),
+			},
+		},
+	})
 }
 
-func testAccCheckMSOSchemaTemplateExternalepgSubnetDestroy(s *terraform.State) error {
+func testAccMSOSchemaTemplateExtEpgSubnetPrerequisiteConfig() string {
+	return fmt.Sprintf(`%s
+	resource "mso_schema_template_external_epg" "%[2]s" {
+		schema_id         = mso_schema.%[3]s.id
+		template_name     = "%[4]s"
+		external_epg_name = "%[2]s"
+		display_name      = "%[2]s"
+		vrf_name          = mso_schema_template_vrf.%[5]s.name
+	}`, testAccMSOSchemaTemplateExtEpgPrerequisiteConfig(), msoSchemaTemplateExtEpgName, msoSchemaName, msoSchemaTemplateName, msoSchemaTemplateVrfName)
+}
+
+func testAccMSOSchemaTemplateExtEpgSubnetConfigCreate() string {
+	return fmt.Sprintf(`%[1]s
+	resource "mso_schema_template_external_epg_subnet" "%[2]s_subnet" {
+		schema_id         = mso_schema.%[3]s.id
+		template_name     = "%[4]s"
+		external_epg_name = mso_schema_template_external_epg.%[2]s.external_epg_name
+		ip                = "%[5]s"
+	}`, testAccMSOSchemaTemplateExtEpgSubnetPrerequisiteConfig(), msoSchemaTemplateExtEpgName, msoSchemaName, msoSchemaTemplateName, msoSchemaTemplateExtEpgSubnetIp)
+}
+
+func testAccMSOSchemaTemplateExtEpgSubnetConfigWithName(name string) string {
+	return fmt.Sprintf(`%[1]s
+	resource "mso_schema_template_external_epg_subnet" "%[2]s_subnet" {
+		schema_id         = mso_schema.%[3]s.id
+		template_name     = "%[4]s"
+		external_epg_name = mso_schema_template_external_epg.%[2]s.external_epg_name
+		ip                = "%[5]s"
+		name              = "%[6]s"
+	}`, testAccMSOSchemaTemplateExtEpgSubnetPrerequisiteConfig(), msoSchemaTemplateExtEpgName, msoSchemaName, msoSchemaTemplateName, msoSchemaTemplateExtEpgSubnetIp, name)
+}
+
+func testAccMSOSchemaTemplateExtEpgSubnetConfigWithScope() string {
+	return fmt.Sprintf(`%[1]s
+	resource "mso_schema_template_external_epg_subnet" "%[2]s_subnet" {
+		schema_id         = mso_schema.%[3]s.id
+		template_name     = "%[4]s"
+		external_epg_name = mso_schema_template_external_epg.%[2]s.external_epg_name
+		ip                = "%[5]s"
+		name              = "%[6]s"
+		scope             = ["import-rtctrl", "export-rtctrl"]
+	}`, testAccMSOSchemaTemplateExtEpgSubnetPrerequisiteConfig(), msoSchemaTemplateExtEpgName, msoSchemaName, msoSchemaTemplateName, msoSchemaTemplateExtEpgSubnetIp, msoSchemaTemplateExtEpgSubnetName2)
+}
+
+func testAccMSOSchemaTemplateExtEpgSubnetConfigWithAggregate() string {
+	return fmt.Sprintf(`%[1]s
+	resource "mso_schema_template_external_epg_subnet" "%[2]s_subnet" {
+		schema_id         = mso_schema.%[3]s.id
+		template_name     = "%[4]s"
+		external_epg_name = mso_schema_template_external_epg.%[2]s.external_epg_name
+		ip                = "%[5]s"
+		scope             = ["shared-rtctrl"]
+		aggregate         = ["shared-rtctrl"]
+	}`, testAccMSOSchemaTemplateExtEpgSubnetPrerequisiteConfig(), msoSchemaTemplateExtEpgName, msoSchemaName, msoSchemaTemplateName, msoSchemaTemplateExtEpgSubnetIp)
+}
+
+func testAccMSOSchemaTemplateExtEpgSubnetConfigWithScopeAndAggregateUpdated() string {
+	return fmt.Sprintf(`%[1]s
+	resource "mso_schema_template_external_epg_subnet" "%[2]s_subnet" {
+		schema_id         = mso_schema.%[3]s.id
+		template_name     = "%[4]s"
+		external_epg_name = mso_schema_template_external_epg.%[2]s.external_epg_name
+		ip                = "%[5]s"
+		scope             = ["shared-rtctrl", "export-rtctrl"]
+		aggregate         = ["shared-rtctrl", "export-rtctrl"]
+	}`, testAccMSOSchemaTemplateExtEpgSubnetPrerequisiteConfig(), msoSchemaTemplateExtEpgName, msoSchemaName, msoSchemaTemplateName, msoSchemaTemplateExtEpgSubnetIp)
+}
+
+func testAccMSOSchemaTemplateExtEpgSubnetConfigWithAggregateEmpty() string {
+	return fmt.Sprintf(`%[1]s
+	resource "mso_schema_template_external_epg_subnet" "%[2]s_subnet" {
+		schema_id         = mso_schema.%[3]s.id
+		template_name     = "%[4]s"
+		external_epg_name = mso_schema_template_external_epg.%[2]s.external_epg_name
+		ip                = "%[5]s"
+		scope             = ["shared-rtctrl", "export-rtctrl"]
+		aggregate         = []
+	}`, testAccMSOSchemaTemplateExtEpgSubnetPrerequisiteConfig(), msoSchemaTemplateExtEpgName, msoSchemaName, msoSchemaTemplateName, msoSchemaTemplateExtEpgSubnetIp)
+}
+
+func testAccMSOSchemaTemplateExtEpgSubnetConfigUpdateIp() string {
+	return fmt.Sprintf(`%[1]s
+	resource "mso_schema_template_external_epg_subnet" "%[2]s_subnet" {
+		schema_id         = mso_schema.%[3]s.id
+		template_name     = "%[4]s"
+		external_epg_name = mso_schema_template_external_epg.%[2]s.external_epg_name
+		ip                = "%[5]s"
+	}`, testAccMSOSchemaTemplateExtEpgSubnetPrerequisiteConfig(), msoSchemaTemplateExtEpgName, msoSchemaName, msoSchemaTemplateName, msoSchemaTemplateExtEpgSubnetIp2)
+}
+
+func testAccCheckMSOSchemaTemplateExtEpgSubnetDestroy(s *terraform.State) error {
 	client := testAccProvider.Meta().(*client.Client)
 
 	for _, rs := range s.RootModule().Resources {
-
 		if rs.Type == "mso_schema_template_external_epg_subnet" {
-			cont, err := client.GetViaURL("api/v1/schemas/5ea809672c00003bc40a2799")
+			schemaID := rs.Primary.Attributes["schema_id"]
+			con, err := client.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 			if err != nil {
 				return nil
-			} else {
-				count, err := cont.ArrayCount("templates")
+			}
+			count, err := con.ArrayCount("templates")
+			if err != nil {
+				return fmt.Errorf("No Template found")
+			}
+			for i := 0; i < count; i++ {
+				tempCont, err := con.ArrayElement(i, "templates")
 				if err != nil {
-					return fmt.Errorf("No Template found")
+					return fmt.Errorf("No template exists")
 				}
-				for i := 0; i < count; i++ {
-					tempCont, err := cont.ArrayElement(i, "templates")
+				if models.StripQuotes(tempCont.S("name").String()) != rs.Primary.Attributes["template_name"] {
+					continue
+				}
+				externalEpgCount, err := tempCont.ArrayCount("externalEpgs")
+				if err != nil {
+					return fmt.Errorf("Unable to get External EPG list")
+				}
+				for j := 0; j < externalEpgCount; j++ {
+					externalEpgCont, err := tempCont.ArrayElement(j, "externalEpgs")
 					if err != nil {
-						return fmt.Errorf("No Template exists")
+						return err
 					}
-					apiTemplateName := models.StripQuotes(tempCont.S("name").String())
-					if apiTemplateName == "Template1" {
-						externalepgCount, err := tempCont.ArrayCount("externalEpgs")
+					if models.StripQuotes(externalEpgCont.S("name").String()) != rs.Primary.Attributes["external_epg_name"] {
+						continue
+					}
+					subnetCount, err := externalEpgCont.ArrayCount("subnets")
+					if err != nil {
+						return nil
+					}
+					for k := 0; k < subnetCount; k++ {
+						subnetCont, err := externalEpgCont.ArrayElement(k, "subnets")
 						if err != nil {
-							return fmt.Errorf("Unable to get External epg list")
+							return err
 						}
-						for j := 0; j < externalepgCount; j++ {
-							epgCont, err := tempCont.ArrayElement(j, "externalEpgs")
-							if err != nil {
-								return err
-							}
-							apiExternalepg := models.StripQuotes(epgCont.S("name").String())
-							if apiExternalepg == "UntitledExternalEPG1" {
-								subnetCount, err := epgCont.ArrayCount("subnets")
-								if err != nil {
-									return fmt.Errorf("Unable to get External Epg Subnets list")
-								}
-								for k := 0; k < subnetCount; k++ {
-									subnetCont, err := epgCont.ArrayElement(k, "subnets")
-									if err != nil {
-										return err
-									}
-									apiIP := models.StripQuotes(subnetCont.S("ip").String())
-									if apiIP == "10.101.100.0/25" {
-										return fmt.Errorf("External Epg Subnet still exists")
-									}
-								}
-							}
+						ip := models.StripQuotes(subnetCont.S("ip").String())
+						if rs.Primary.Attributes["ip"] == ip {
+							return fmt.Errorf("Schema Template External EPG Subnet record still exists")
 						}
 					}
 				}
@@ -194,18 +293,4 @@ func testAccCheckMSOSchemaTemplateExternalepgSubnetDestroy(s *terraform.State) e
 		}
 	}
 	return nil
-}
-func testAccCheckMSOSchemaTemplateExternalepgSubnetAttributes(name string, ss *TemplateExternalepgSubnet) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		if name != ss.name {
-			return fmt.Errorf("Bad Template External Epg Subnet Relationship Type %s", ss.name)
-		}
-
-		return nil
-	}
-}
-
-type TemplateExternalepgSubnet struct {
-	name string
-	ip   string
 }

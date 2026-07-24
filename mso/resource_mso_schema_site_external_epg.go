@@ -8,8 +8,8 @@ import (
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func resourceMSOSchemaSiteExternalEpg() *schema.Resource {
@@ -51,10 +51,11 @@ func resourceMSOSchemaSiteExternalEpg() *schema.Resource {
 				ValidateFunc: validation.StringLenBetween(1, 1000),
 			},
 			"l3out_name": &schema.Schema{
-				Type:         schema.TypeString,
-				Optional:     true,
-				Computed:     true,
-				ValidateFunc: validation.StringLenBetween(1, 1000),
+				Type:     schema.TypeString,
+				Optional: true,
+				// Commented out computed to allow setting l3out_name to empty string
+				// Computed:     true,
+				ValidateFunc: validation.StringLenBetween(0, 1000),
 			},
 			"l3out_template_name": &schema.Schema{
 				Type:          schema.TypeString,
@@ -124,6 +125,10 @@ func resourceMSOSchemaSiteExternalEpgImport(d *schema.ResourceData, m interface{
 						d.Set("template_name", match[2])
 						d.Set("site_id", apiSiteId)
 
+						d.Set("l3out_on_apic", false)
+						d.Set("l3out_name", "")
+						d.Set("l3out_schema_id", "")
+						d.Set("l3out_template_name", "")
 						l3outRef := models.StripQuotes(externalEpgCont.S("l3outRef").String())
 						l3outDn := models.StripQuotes(externalEpgCont.S("l3outDn").String())
 						if l3outRef != "{}" && l3outRef != "" {
@@ -295,6 +300,10 @@ func resourceMSOSchemaSiteExternalEpgRead(d *schema.ResourceData, m interface{})
 						d.Set("template_name", match[2])
 						d.Set("site_id", apiSiteId)
 
+						d.Set("l3out_on_apic", false)
+						d.Set("l3out_name", "")
+						d.Set("l3out_schema_id", "")
+						d.Set("l3out_template_name", "")
 						l3outRef := models.StripQuotes(externalEpgCont.S("l3outRef").String())
 						l3outDn := models.StripQuotes(externalEpgCont.S("l3outDn").String())
 						if l3outRef != "{}" && l3outRef != "" {

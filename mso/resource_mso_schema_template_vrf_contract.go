@@ -9,8 +9,8 @@ import (
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 var humanToApiType = map[string]string{
@@ -49,6 +49,11 @@ func resourceMSOTemplateVRFContract() *schema.Resource {
 				ForceNew:     true,
 				ValidateFunc: validation.StringLenBetween(1, 1000),
 			},
+			// There is a difference in behavior for this relationship_type attribute between resources
+			// In mso/resource_mso_schema_template_anp_epg_contract.go ForceNew is not set
+			// In mso/resource_mso_schema_template_external_epg_contract.go ForceNew is not set
+			// Updating a relationship_type would be possible if we want to introduce this change in behavior
+			// This requires the introduction of a new update function
 			"relationship_type": &schema.Schema{
 				Type:     schema.TypeString,
 				Required: true,

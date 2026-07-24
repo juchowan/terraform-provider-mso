@@ -5,13 +5,14 @@ import (
 	"log"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func dataSourceMSOSchemaSiteVrfRouteLeak() *schema.Resource {
 	return &schema.Resource{
-		Read: dataSourceMSOSchemaSiteVrfRouteLeakRead,
+		DeprecationMessage: cloudDeprecationMessage("mso_schema_site_vrf_route_leak"),
+		Read:               dataSourceMSOSchemaSiteVrfRouteLeakRead,
 
 		SchemaVersion: version,
 

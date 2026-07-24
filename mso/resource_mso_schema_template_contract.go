@@ -1,6 +1,7 @@
 package mso
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"regexp"
@@ -9,8 +10,8 @@ import (
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func resourceMSOTemplateContract() *schema.Resource {
@@ -185,29 +186,13 @@ func resourceMSOTemplateContract() *schema.Resource {
 				},
 			},
 			"filter_relationships": {
-				Type:     schema.TypeMap,
-				Optional: true,
-				Computed: true,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"filter_schema_id": &schema.Schema{
-							Type:     schema.TypeString,
-							Optional: true,
-							Computed: true,
-						},
-						"filter_template_name": &schema.Schema{
-							Type:     schema.TypeString,
-							Optional: true,
-							Computed: true,
-						},
-						"filter_name": &schema.Schema{
-							Type:     schema.TypeString,
-							Optional: true,
-						},
-					},
-				},
+				Type:          schema.TypeMap,
+				Optional:      true,
+				Computed:      true,
 				ConflictsWith: []string{"filter_relationship"},
 				Deprecated:    "use filter_relationship instead",
+				// SDKv2 does not support Elem with schema.Resource on TypeMap fields.
+				// Expected keys: "filter_schema_id" (string), "filter_template_name" (string), "filter_name" (string). Validation skipped - field is deprecated.
 			},
 			"directives": {
 				Type:       schema.TypeList,
@@ -219,10 +204,11 @@ func resourceMSOTemplateContract() *schema.Resource {
 			"description": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
-				Computed: true,
+				// Removed computed to allow description to be set to an empty string
+				// Computed: true,
 			},
 		}),
-		CustomizeDiff: func(diff *schema.ResourceDiff, v interface{}) error {
+		CustomizeDiff: func(ctx context.Context, diff *schema.ResourceDiff, v interface{}) error {
 			stateFilterType, configFilterType := diff.GetChange("filter_type")
 			if configFilterType != stateFilterType && stateFilterType != "" {
 				return fmt.Errorf("The filter_type cannot be changed. Change detected from '%s' to '%s'.", stateFilterType, configFilterType)
@@ -581,7 +567,7 @@ func resourceMSOTemplateContractUpdate(d *schema.ResourceData, m interface{}) er
 	if d.HasChange("target_dscp") {
 		targetDscp := d.Get("target_dscp").(string)
 		if targetDscp != "" {
-			err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/prio", updatePath), targetDscp)
+			err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/targetDscp", updatePath), targetDscp)
 			if err != nil {
 				return err
 			}
@@ -630,11 +616,7 @@ func resourceMSOTemplateContractUpdate(d *schema.ResourceData, m interface{}) er
 	// filterRelationships, filterRelationshipsProviderToConsumer, filterRelationshipsConsumerToProvider := getFilterRelationshipsFromConfig(schemaId, templateName, filterRelationship)
 
 	if d.HasChange("description") {
-		var description string
-		if descr, ok := d.GetOk("description"); ok {
-			description = descr.(string)
-		}
-		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/description", updatePath), description)
+		err := addPatchPayloadToContainer(payloadCont, "replace", fmt.Sprintf("%s/description", updatePath), d.Get("description"))
 		if err != nil {
 			return err
 		}

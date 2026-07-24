@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 )
 
 func TestAccMSOTenantPoliciesIPSLATrackListResource(t *testing.T) {
-	print(testAccMSOTenantPoliciesIPSLATrackListConfigCreate())
 	resource.Test(t, resource.TestCase{
 		PreCheck:  func() { testAccPreCheck(t) },
 		Providers: testAccProviders,
@@ -25,11 +24,9 @@ func TestAccMSOTenantPoliciesIPSLATrackListResource(t *testing.T) {
 					resource.TestCheckResourceAttr("mso_tenant_policies_ipsla_track_list."+msoTenantPolicyTemplateIPSLATrackListName, "members.#", "1"),
 					CustomTestCheckTypeSetElemAttrs("mso_tenant_policies_ipsla_track_list."+msoTenantPolicyTemplateIPSLATrackListName, "members",
 						map[string]string{
-							"destination_ip":               "1.1.1.1",
-							"ipsla_monitoring_policy_uuid": fmt.Sprintf("mso_tenant_policies_ipsla_monitoring_policy.%s.uuid", msoTenantPolicyTemplateIPSLAMonitoringPolicyName),
-							"scope_type":                   "bd",
-							"scope_uuid":                   fmt.Sprintf("mso_schema_template_bd.%s.uuid", msoSchemaTemplateBdName),
-							"weight":                       "10",
+							"destination_ip": "1.1.1.1",
+							"scope_type":     "bd",
+							"weight":         "10",
 						},
 					),
 				),
@@ -46,20 +43,16 @@ func TestAccMSOTenantPoliciesIPSLATrackListResource(t *testing.T) {
 					resource.TestCheckResourceAttr("mso_tenant_policies_ipsla_track_list."+msoTenantPolicyTemplateIPSLATrackListName, "members.#", "2"),
 					CustomTestCheckTypeSetElemAttrs("mso_tenant_policies_ipsla_track_list."+msoTenantPolicyTemplateIPSLATrackListName, "members",
 						map[string]string{
-							"destination_ip":               "1.1.1.3",
-							"ipsla_monitoring_policy_uuid": fmt.Sprintf("mso_tenant_policies_ipsla_monitoring_policy.%s.uuid", msoTenantPolicyTemplateIPSLAMonitoringPolicyName),
-							"scope_type":                   "bd",
-							"scope_uuid":                   fmt.Sprintf("mso_schema_template_bd.%s.uuid", msoSchemaTemplateBdName),
-							"weight":                       "10",
+							"destination_ip": "1.1.1.3",
+							"scope_type":     "bd",
+							"weight":         "10",
 						},
 					),
 					CustomTestCheckTypeSetElemAttrs("mso_tenant_policies_ipsla_track_list."+msoTenantPolicyTemplateIPSLATrackListName, "members",
 						map[string]string{
-							"destination_ip":               "1.1.1.2",
-							"ipsla_monitoring_policy_uuid": fmt.Sprintf("mso_tenant_policies_ipsla_monitoring_policy.%s.uuid", msoTenantPolicyTemplateIPSLAMonitoringPolicyName),
-							"scope_type":                   "bd",
-							"scope_uuid":                   fmt.Sprintf("mso_schema_template_bd.%s.uuid", msoSchemaTemplateBdName),
-							"weight":                       "10",
+							"destination_ip": "1.1.1.2",
+							"scope_type":     "bd",
+							"weight":         "10",
 						},
 					),
 				),
@@ -76,11 +69,9 @@ func TestAccMSOTenantPoliciesIPSLATrackListResource(t *testing.T) {
 					resource.TestCheckResourceAttr("mso_tenant_policies_ipsla_track_list."+msoTenantPolicyTemplateIPSLATrackListName, "members.#", "1"),
 					CustomTestCheckTypeSetElemAttrs("mso_tenant_policies_ipsla_track_list."+msoTenantPolicyTemplateIPSLATrackListName, "members",
 						map[string]string{
-							"destination_ip":               "1.1.1.2",
-							"ipsla_monitoring_policy_uuid": fmt.Sprintf("mso_tenant_policies_ipsla_monitoring_policy.%s.uuid", msoTenantPolicyTemplateIPSLAMonitoringPolicyName),
-							"scope_type":                   "bd",
-							"scope_uuid":                   fmt.Sprintf("mso_schema_template_bd.%s.uuid", msoSchemaTemplateBdName),
-							"weight":                       "10",
+							"destination_ip": "1.1.1.2",
+							"scope_type":     "bd",
+							"weight":         "10",
 						},
 					),
 				),

@@ -2,214 +2,176 @@ package mso
 
 import (
 	"fmt"
-	"log"
-	"strings"
 	"testing"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
-func TestAccSchemaTemplateServiceGraph_Basic(t *testing.T) {
-	var s SchemaTemplateServiceGraphTest
+// msoSchemaTemplateServiceGraphSchemaId is set during the first test step's Check to capture the dynamic schema ID for use in the manual deletion PreConfig step.
+var msoSchemaTemplateServiceGraphSchemaId string
+
+func TestAccMSOSchemaTemplateServiceGraphResource(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckMsoSchemaTemplateServiceGraphDestroy,
+		CheckDestroy: testAccCheckMSOSchemaTemplateServiceGraphDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCheckMsoSchemaTemplateServiceGraphConfig_basic("acctest"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMsoSchemaTemplateServiceGraphExists("mso_schema_template_service_graph.test_sg", &s),
-					testAccCheckMsoSchemaTemplateServiceGraphAttributes(&s, "acctest"),
+				PreConfig: func() {
+					fmt.Println("Test: Create Schema Template Service Graph with a single firewall node and description")
+				},
+				Config: testAccMSOSchemaTemplateServiceGraphConfigCreate(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "schema_id"),
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "template_name", msoSchemaTemplateName),
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "service_graph_name", msoSchemaTemplateServiceGraphName),
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "description", "Terraform test service graph"),
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "service_node.#", "1"),
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "service_node.0.type", "firewall"),
+					// Capture the dynamic schema ID from state for use in the manual deletion PreConfig step
+					func(s *terraform.State) error {
+						rs, ok := s.RootModule().Resources["mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName]
+						if !ok {
+							return fmt.Errorf("Service Graph resource not found in state")
+						}
+						msoSchemaTemplateServiceGraphSchemaId = rs.Primary.Attributes["schema_id"]
+						return nil
+					},
+				),
+			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Update Schema Template Service Graph description and add a second service node (load-balancer) and third custom service node")
+				},
+				Config: testAccMSOSchemaTemplateServiceGraphConfigUpdateThreeNodes(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "service_graph_name", msoSchemaTemplateServiceGraphName),
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "description", "Terraform test service graph updated"),
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "service_node.#", "3"),
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "service_node.0.type", "firewall"),
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "service_node.1.type", "load-balancer"),
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "service_node.2.type", msoServiceNodeTypeName),
+				),
+			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Update Schema Template Service Graph to remove description")
+				},
+				Config: testAccMSOSchemaTemplateServiceGraphConfigRemoveDescription(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "service_graph_name", msoSchemaTemplateServiceGraphName),
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "description", ""),
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "service_node.#", "3"),
+				),
+			},
+			{
+				PreConfig:         func() { fmt.Println("Test: Import Schema Template Service Graph") },
+				ResourceName:      "mso_schema_template_service_graph." + msoSchemaTemplateServiceGraphName,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Recreate Schema Template Service Graph after manual deletion from NDO")
+					msoClient := testAccProvider.Meta().(*client.Client)
+					path := fmt.Sprintf("/templates/%s/serviceGraphs/%s", msoSchemaTemplateName, msoSchemaTemplateServiceGraphName)
+					_, err := msoClient.PatchbyID(
+						fmt.Sprintf("api/v1/schemas/%s", msoSchemaTemplateServiceGraphSchemaId),
+						models.GetRemovePatchPayload(path),
+					)
+					if err != nil {
+						t.Fatalf("Failed to manually delete Service Graph: %v", err)
+					}
+				},
+				Config: testAccMSOSchemaTemplateServiceGraphConfigCreate(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "schema_id"),
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "service_graph_name", msoSchemaTemplateServiceGraphName),
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "description", "Terraform test service graph"),
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "service_node.#", "1"),
+					resource.TestCheckResourceAttr("mso_schema_template_service_graph."+msoSchemaTemplateServiceGraphName, "service_node.0.type", "firewall"),
 				),
 			},
 		},
 	})
 }
 
-func TestAccSchemaTemplateServiceGraph_Update(t *testing.T) {
-	var s SchemaTemplateServiceGraphTest
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckMsoSchemaTemplateServiceGraphDestroy,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccCheckMsoSchemaTemplateServiceGraphConfig_basic("acctest"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMsoSchemaTemplateServiceGraphExists("mso_schema_template_service_graph.test_sg", &s),
-					testAccCheckMsoSchemaTemplateServiceGraphAttributes(&s, "acctest"),
-				),
-			},
-			{
-				Config: testAccCheckMsoSchemaTemplateServiceGraphConfig_basic("acctest_update"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMsoSchemaTemplateServiceGraphExists("mso_schema_template_service_graph.test_sg", &s),
-					testAccCheckMsoSchemaTemplateServiceGraphAttributes(&s, "acctest_update"),
-				),
-			},
-		},
-	})
-}
-
-func testAccCheckMsoSchemaTemplateServiceGraphConfig_basic(desc string) string {
-	return fmt.Sprintf(`
-	resource "mso_schema_template_service_graph" "test_sg" {
-		schema_id = "5f06a4c40f0000b63dbbd647"
-		template_name = "Template1"
-		service_graph_name = "acctestgraph"
-		service_node_type = "firewall"
-		description = "%s"
-		site_nodes  {
-			site_id = "5f05c69f1900002234d0537e"
-			tenant_name = "NkAutomation"
-			node_name = "nk-fw-2"
-		}
-	
-	}
-	`, desc)
-}
-
-func testAccCheckMsoSchemaTemplateServiceGraphExists(schemaTemplateVrfName string, stvc *SchemaTemplateServiceGraphTest) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		rs1, err1 := s.RootModule().Resources[schemaTemplateVrfName]
-
-		if !err1 {
-			return fmt.Errorf("Schema Template Service Graph record %s not found", schemaTemplateVrfName)
-		}
-
-		if rs1.Primary.ID == "" {
-			return fmt.Errorf("No Schema Template Service Graph id was set")
-		}
-
-		client := testAccProvider.Meta().(*client.Client)
-		cont, err := client.GetViaURL("api/v1/schemas/5f06a4c40f0000b63dbbd647")
-
-		if err != nil {
-			return err
-		}
-
-		stvt := SchemaTemplateServiceGraphTest{}
-		stvt.SchemaId = "5f06a4c40f0000b63dbbd647"
-
-		sgCont, _, err := getTemplateServiceGraphCont(cont, "Template1", "acctestgraph")
-
-		if err != nil {
-			return err
-		}
-
-		stvt.GraphName = "acctestgraph"
-		stvt.Template = "Template1"
-
-		nodesCount, err := cont.ArrayCount("serviceNodeTypes")
-		if err != nil {
-			return err
-		}
-
-		nodeId, err := getNodeIdFromName(cont, nodesCount, "firewall")
-		if err != nil {
-			return err
-		}
-
-		_, _, err = getTemplateServiceNodeCont(sgCont, "tfnode1", nodeId)
-
-		if err != nil {
-			return err
-		}
-		stvt.NodeType = "firewall"
-
-		stvt.Description = models.StripQuotes(sgCont.S("description").String())
-
-		graphCont, _, err := getSiteServiceGraphCont(
-			cont,
-			"5f06a4c40f0000b63dbbd647",
-			"Template1",
-			"5f05c69f1900002234d0537e",
-			"acctestgraph",
-		)
-
-		if err != nil {
-			return err
-		}
-
-		nodeCont, _, err := getSiteServiceNodeCont(
-			graphCont,
-			"5f06a4c40f0000b63dbbd647",
-			"Template1",
-			"acctestgraph",
-			"tfnode1",
-		)
-
-		if err != nil {
-			return err
-		}
-
-		deviceDn := models.StripQuotes(nodeCont.S("device", "dn").String())
-
-		dnSplit := strings.Split(deviceDn, "/")
-
-		tnName := strings.Join(strings.Split(dnSplit[1], "-")[1:], "-")
-
-		stvt.TenantName = tnName
-		stvt.NodeName = strings.Join(strings.Split(dnSplit[2], "-")[1:], "-")
-		stvt.SiteId = "5f05c69f1900002234d0537e"
-
-		log.Printf("hiiiiii %v", stvt)
-		stv := &stvt
-		*stvc = *stv
-
-		return nil
-	}
-}
-
-func testAccCheckMsoSchemaTemplateServiceGraphDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*client.Client)
-
+func testAccCheckMSOSchemaTemplateServiceGraphDestroy(s *terraform.State) error {
+	msoClient := testAccProvider.Meta().(*client.Client)
 	for _, rs := range s.RootModule().Resources {
-
-		if rs.Type == "mso_schema_template_service_graph" {
-			cont, err := client.GetViaURL("api/v1/schemas/5f06a4c40f0000b63dbbd647")
-			if err != nil {
-				return nil
-			}
-
-			_, ind, err := getTemplateServiceGraphCont(cont, "Template1", "acctestgraph")
-
-			if ind != -1 {
-				return fmt.Errorf("Service graph still exists")
-			}
-
+		if rs.Type != "mso_schema_template_service_graph" {
+			continue
+		}
+		schemaId := rs.Primary.Attributes["schema_id"]
+		cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+		if err != nil {
+			return nil
+		}
+		_, _, err = getTemplateServiceGraphCont(cont, rs.Primary.Attributes["template_name"], rs.Primary.Attributes["service_graph_name"])
+		if err == nil {
+			return fmt.Errorf("Schema Template Service Graph still exists")
 		}
 	}
 	return nil
 }
 
-func testAccCheckMsoSchemaTemplateServiceGraphAttributes(stvc *SchemaTemplateServiceGraphTest, desc string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		if "acctestgraph" != stvc.GraphName {
-			log.Printf("hjjjjj %v", stvc)
-			return fmt.Errorf("Bad Schema Template Service Graph Name %s", stvc.GraphName)
-		}
-
-		if desc != stvc.Description {
-			return fmt.Errorf("Bad Schema Template Service Graph Description %s", desc)
-		}
-		return nil
-	}
+func testAccMSOSchemaTemplateServiceGraphDependencies() string {
+	return fmt.Sprintf(`%s%s%s`, testSiteConfigAnsibleTest(), testTenantConfig(), testSchemaConfig())
 }
 
-type SchemaTemplateServiceGraphTest struct {
-	Id          string `json:",omitempty"`
-	SchemaId    string `json:",omitempty"`
-	Template    string `json:",omitempty"`
-	GraphName   string `json:",omitempty"`
-	NodeType    string `json:",omitempty"`
-	SiteId      string `json:",omitempty"`
-	NodeName    string `json:",omitempty"`
-	TenantName  string `json:",omitempty"`
-	Description string `json:",omitempty"`
+func testAccMSOSchemaTemplateServiceGraphConfigCreate() string {
+	return fmt.Sprintf(`%s
+resource "mso_schema_template_service_graph" "%[2]s" {
+  schema_id          = mso_schema.%[3]s.id
+  template_name      = "%[4]s"
+  service_graph_name = "%[2]s"
+  description        = "Terraform test service graph"
+
+  service_node {
+    type = "firewall"
+  }
+}
+`, testAccMSOSchemaTemplateServiceGraphDependencies(), msoSchemaTemplateServiceGraphName, msoSchemaName, msoSchemaTemplateName)
+}
+
+func testAccMSOSchemaTemplateServiceGraphConfigUpdateThreeNodes() string {
+	return testAccMSOSchemaTemplateServiceGraphConfigThreeNodes("Terraform test service graph updated")
+}
+
+func testAccMSOSchemaTemplateServiceGraphConfigRemoveDescription() string {
+	return testAccMSOSchemaTemplateServiceGraphConfigThreeNodes("")
+}
+
+func testAccMSOSchemaTemplateServiceGraphConfigThreeNodes(description string) string {
+	descLine := ""
+	if description != "" {
+		descLine = fmt.Sprintf("  description        = %q\n", description)
+	}
+	return fmt.Sprintf(`%s
+
+resource "mso_service_node_type" "%[2]s" {
+  name = "%[2]s"
+}
+
+resource "mso_schema_template_service_graph" "%[3]s" {
+  schema_id          = mso_schema.%[4]s.id
+  template_name      = "%[5]s"
+  service_graph_name = "%[3]s"
+%[6]s
+  service_node {
+    type = "firewall"
+  }
+
+  service_node {
+    type = "load-balancer"
+  }
+
+  service_node {
+    type = mso_service_node_type.%[2]s.name
+  }
+}
+`, testAccMSOSchemaTemplateServiceGraphDependencies(), msoServiceNodeTypeName, msoSchemaTemplateServiceGraphName, msoSchemaName, msoSchemaTemplateName, descLine)
 }

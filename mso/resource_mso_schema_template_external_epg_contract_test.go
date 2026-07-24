@@ -7,191 +7,185 @@ import (
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
-func TestAccMSOSchemaTemplateExternalepgContract_Basic(t *testing.T) {
-	var ss TemplateExternalepgContract
+// msoSchemaTemplateExtEpgContractSchemaId is set during the first test step's Check to capture the dynamic schema ID for use in the manual deletion PreConfig step.
+var msoSchemaTemplateExtEpgContractSchemaId string
+
+func TestAccMSOSchemaTemplateExternalEpgContractResource(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckMSOSchemaTemplateExternalepgContractDestroy,
+		CheckDestroy: testAccCheckMSOSchemaTemplateExtEpgContractDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCheckMSOTemplateExternalepgContractConfig_basic("provider"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMSOSchemaTemplateExternalepgContractExists("mso_schema_template_external_epg_contract.c1", &ss),
-					testAccCheckMSOSchemaTemplateExternalepgContractAttributes("provider", &ss),
+				PreConfig: func() { fmt.Println("Test: Create External EPG Contract as provider") },
+				Config:    testAccMSOSchemaTemplateExtEpgContractConfigProvider(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("mso_schema_template_external_epg_contract."+msoSchemaTemplateContractName+"_provider", "schema_id"),
+					resource.TestCheckResourceAttr("mso_schema_template_external_epg_contract."+msoSchemaTemplateContractName+"_provider", "template_name", msoSchemaTemplateName),
+					resource.TestCheckResourceAttr("mso_schema_template_external_epg_contract."+msoSchemaTemplateContractName+"_provider", "external_epg_name", msoSchemaTemplateExtEpgName),
+					resource.TestCheckResourceAttr("mso_schema_template_external_epg_contract."+msoSchemaTemplateContractName+"_provider", "contract_name", msoSchemaTemplateContractName),
+					resource.TestCheckResourceAttr("mso_schema_template_external_epg_contract."+msoSchemaTemplateContractName+"_provider", "relationship_type", "provider"),
+					resource.TestCheckResourceAttrSet("mso_schema_template_external_epg_contract."+msoSchemaTemplateContractName+"_provider", "contract_schema_id"),
+					resource.TestCheckResourceAttr("mso_schema_template_external_epg_contract."+msoSchemaTemplateContractName+"_provider", "contract_template_name", msoSchemaTemplateName),
+					// Capture the dynamic schema ID from state for use in the manual deletion PreConfig step.
+					func(s *terraform.State) error {
+						rs, ok := s.RootModule().Resources["mso_schema_template_external_epg_contract."+msoSchemaTemplateContractName+"_provider"]
+						if !ok {
+							return fmt.Errorf("External EPG Contract resource not found in state")
+						}
+						msoSchemaTemplateExtEpgContractSchemaId = rs.Primary.Attributes["schema_id"]
+						return nil
+					},
+				),
+			},
+			{
+				PreConfig: func() { fmt.Println("Test: Update External EPG Contract relationship_type to consumer") },
+				Config:    testAccMSOSchemaTemplateExtEpgContractConfigConsumer(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("mso_schema_template_external_epg_contract."+msoSchemaTemplateContractName+"_provider", "contract_name", msoSchemaTemplateContractName),
+					resource.TestCheckResourceAttr("mso_schema_template_external_epg_contract."+msoSchemaTemplateContractName+"_provider", "relationship_type", "consumer"),
+				),
+			},
+			{
+				PreConfig: func() { fmt.Println("Test: Reset External EPG Contract relationship_type to provider") },
+				Config:    testAccMSOSchemaTemplateExtEpgContractConfigProvider(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("mso_schema_template_external_epg_contract."+msoSchemaTemplateContractName+"_provider", "contract_name", msoSchemaTemplateContractName),
+					resource.TestCheckResourceAttr("mso_schema_template_external_epg_contract."+msoSchemaTemplateContractName+"_provider", "relationship_type", "provider"),
+				),
+			},
+			{
+				PreConfig:    func() { fmt.Println("Test: Import External EPG Contract") },
+				ResourceName: "mso_schema_template_external_epg_contract." + msoSchemaTemplateContractName + "_provider",
+				ImportState:  true,
+				ImportStateIdFunc: func(s *terraform.State) (string, error) {
+					rs, ok := s.RootModule().Resources["mso_schema_template_external_epg_contract."+msoSchemaTemplateContractName+"_provider"]
+					if !ok {
+						return "", fmt.Errorf("External EPG Contract resource not found in state")
+					}
+					return fmt.Sprintf("%s/templates/%s/externalEpgs/%s/contractRelationships/%s/%s",
+						rs.Primary.Attributes["schema_id"],
+						rs.Primary.Attributes["template_name"],
+						rs.Primary.Attributes["external_epg_name"],
+						rs.Primary.Attributes["contract_name"],
+						rs.Primary.Attributes["relationship_type"],
+					), nil
+				},
+				ImportStateVerify: true,
+			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Recreate External EPG Contract after manual deletion from NDO")
+					msoClient := testAccProvider.Meta().(*client.Client)
+					cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", msoSchemaTemplateExtEpgContractSchemaId))
+					if err != nil {
+						t.Fatalf("Failed to get schema: %v", err)
+					}
+					index, _, err := getSchemaTemplateExtEpgContract(cont, msoSchemaTemplateName, msoSchemaTemplateExtEpgName, msoSchemaTemplateContractName, msoSchemaTemplateExtEpgContractSchemaId, msoSchemaTemplateName, "provider")
+					if err != nil {
+						t.Fatalf("Failed to fetch contract index: %v", err)
+					}
+					if index == -1 {
+						t.Fatalf("External EPG Contract not found for manual deletion")
+					}
+					contractRemovePatchPayload := models.GetRemovePatchPayload(fmt.Sprintf("/templates/%s/externalEpgs/%s/contractRelationships/%d", msoSchemaTemplateName, msoSchemaTemplateExtEpgName, index))
+					_, err = msoClient.PatchbyID(fmt.Sprintf("api/v1/schemas/%s", msoSchemaTemplateExtEpgContractSchemaId), contractRemovePatchPayload)
+					if err != nil {
+						t.Fatalf("Failed to manually delete External EPG Contract: %v", err)
+					}
+				},
+				Config: testAccMSOSchemaTemplateExtEpgContractConfigProvider(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("mso_schema_template_external_epg_contract."+msoSchemaTemplateContractName+"_provider", "contract_name", msoSchemaTemplateContractName),
+					resource.TestCheckResourceAttr("mso_schema_template_external_epg_contract."+msoSchemaTemplateContractName+"_provider", "relationship_type", "provider"),
 				),
 			},
 		},
 	})
 }
 
-func TestAccMSOSchemaTemplateExternalepgContract_Update(t *testing.T) {
-	var ss TemplateExternalepgContract
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckMSOSchemaTemplateExternalepgContractDestroy,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccCheckMSOTemplateExternalepgContractConfig_basic("provider"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMSOSchemaTemplateExternalepgContractExists("mso_schema_template_external_epg_contract.c1", &ss),
-					testAccCheckMSOSchemaTemplateExternalepgContractAttributes("provider", &ss),
-				),
-			},
-			{
-				Config: testAccCheckMSOTemplateExternalepgContractConfig_basic("consumer"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMSOSchemaTemplateExternalepgContractExists("mso_schema_template_external_epg_contract.c1", &ss),
-					testAccCheckMSOSchemaTemplateExternalepgContractAttributes("consumer", &ss),
-				),
-			},
-		},
-	})
+func testAccMSOSchemaTemplateExtEpgContractPrerequisiteConfig() string {
+	return fmt.Sprintf(`%s%s%s%s%s%s`,
+		testSiteConfigAnsibleTest(),
+		testTenantConfig(),
+		testSchemaConfig(),
+		testSchemaTemplateVrfConfig(),
+		testSchemaTemplateExtEpgConfig(),
+		testSchemaTemplateFilterEntryConfig(),
+	) + testSchemaTemplateContractConfig()
 }
 
-func testAccCheckMSOTemplateExternalepgContractConfig_basic(name string) string {
-	return fmt.Sprintf(`
-	resource "mso_schema_template_external_epg_contract" "c1" {
-		schema_id = "5ea809672c00003bc40a2799"
-		template_name = "Template1"
-		contract_name = "contract9999"
-		external_epg_name = "UntitledExternalEPG1"
-		relationship_type = "%s"
-	}
-`, name)
+func testAccMSOSchemaTemplateExtEpgContractConfigProvider() string {
+	return fmt.Sprintf(`%[1]s
+resource "mso_schema_template_external_epg_contract" "%[2]s_provider" {
+	schema_id         = mso_schema.%[3]s.id
+	template_name     = "%[4]s"
+	external_epg_name = mso_schema_template_external_epg.%[5]s.external_epg_name
+	contract_name     = mso_schema_template_contract.%[2]s.contract_name
+	relationship_type = "provider"
+}
+`, testAccMSOSchemaTemplateExtEpgContractPrerequisiteConfig(), msoSchemaTemplateContractName, msoSchemaName, msoSchemaTemplateName, msoSchemaTemplateExtEpgName)
 }
 
-func testAccCheckMSOSchemaTemplateExternalepgContractExists(externalepgName string, ss *TemplateExternalepgContract) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*client.Client)
-		rs1, err1 := s.RootModule().Resources[externalepgName]
+func testAccMSOSchemaTemplateExtEpgContractConfigConsumer() string {
+	return fmt.Sprintf(`%[1]s
+resource "mso_schema_template_external_epg_contract" "%[2]s_provider" {
+	schema_id         = mso_schema.%[3]s.id
+	template_name     = "%[4]s"
+	external_epg_name = mso_schema_template_external_epg.%[5]s.external_epg_name
+	contract_name     = mso_schema_template_contract.%[2]s.contract_name
+	relationship_type = "consumer"
+}
+`, testAccMSOSchemaTemplateExtEpgContractPrerequisiteConfig(), msoSchemaTemplateContractName, msoSchemaName, msoSchemaTemplateName, msoSchemaTemplateExtEpgName)
+}
 
-		if !err1 {
-			return fmt.Errorf("External Epg Contract %s not found", externalepgName)
-		}
-		if rs1.Primary.ID == "" {
-			return fmt.Errorf("No Schema id was set")
-		}
+// testAccCheckMSOSchemaTemplateExtEpgContractDestroy verifies the contract relationship is removed after test.
+func testAccCheckMSOSchemaTemplateExtEpgContractDestroy(s *terraform.State) error {
+	client := testAccProvider.Meta().(*client.Client)
 
-		cont, err := client.GetViaURL("api/v1/schemas/5ea809672c00003bc40a2799")
-		if err != nil {
-			return err
-		}
-		count, err := cont.ArrayCount("templates")
-		if err != nil {
-			return fmt.Errorf("No Template found")
-		}
-		tp := TemplateExternalepgContract{}
-		found := false
-		for i := 0; i < count; i++ {
-			tempCont, err := cont.ArrayElement(i, "templates")
+	for _, rs := range s.RootModule().Resources {
+		if rs.Type == "mso_schema_template_external_epg_contract" {
+			schemaID := rs.Primary.Attributes["schema_id"]
+			cont, err := client.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaID))
 			if err != nil {
-				return err
+				return nil
 			}
-
-			apiTemplateName := models.StripQuotes(tempCont.S("name").String())
-			if apiTemplateName == "Template1" {
-				externalepgCount, err := tempCont.ArrayCount("externalEpgs")
+			count, err := cont.ArrayCount("templates")
+			if err != nil {
+				return fmt.Errorf("No Template found")
+			}
+			for i := 0; i < count; i++ {
+				tempCont, err := cont.ArrayElement(i, "templates")
 				if err != nil {
-					return fmt.Errorf("Unable to get External Epg list")
+					return fmt.Errorf("No template exists")
 				}
-				for j := 0; j < externalepgCount; j++ {
+				epgCount, err := tempCont.ArrayCount("externalEpgs")
+				if err != nil {
+					return fmt.Errorf("Unable to get External EPG list")
+				}
+				for j := 0; j < epgCount; j++ {
 					epgCont, err := tempCont.ArrayElement(j, "externalEpgs")
 					if err != nil {
 						return err
 					}
-					apiExternalepg := models.StripQuotes(epgCont.S("name").String())
-					if apiExternalepg == "UntitledExternalEPG1" {
-						contractCount, err := epgCont.ArrayCount("contractRelationships")
-						if err != nil {
-							return fmt.Errorf("Unable to get contract Relationships list")
-						}
-						for k := 0; k < contractCount; k++ {
-							contractCont, err := epgCont.ArrayElement(k, "contractRelationships")
-							if err != nil {
-
-								return err
-							}
-							contractRef := models.StripQuotes(contractCont.S("contractRef").String())
-							re := regexp.MustCompile("/schemas/(.*)/templates/(.*)/contracts/(.*)")
-							split := re.FindStringSubmatch(contractRef)
-							if "contract9999" == fmt.Sprintf("%s", split[3]) {
-								tp.name = fmt.Sprintf("%s", split[3])
-								tp.relation = models.StripQuotes(contractCont.S("relationshipType").String())
-								found = true
-								break
-							}
-						}
-					}
-				}
-			}
-		}
-		if !found {
-			return fmt.Errorf("External Epg Contract not found from API")
-		}
-
-		tp1 := &tp
-		*ss = *tp1
-		return nil
-	}
-}
-
-func testAccCheckMSOSchemaTemplateExternalepgContractDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*client.Client)
-
-	for _, rs := range s.RootModule().Resources {
-
-		if rs.Type == "mso_schema_template_external_epg" {
-			cont, err := client.GetViaURL("api/v1/schemas/5ea809672c00003bc40a2799")
-			if err != nil {
-				return nil
-			} else {
-				count, err := cont.ArrayCount("templates")
-				if err != nil {
-					return fmt.Errorf("No Template found")
-				}
-				for i := 0; i < count; i++ {
-					tempCont, err := cont.ArrayElement(i, "templates")
+					crefCount, err := epgCont.ArrayCount("contractRelationships")
 					if err != nil {
-						return fmt.Errorf("No Template exists")
+						return fmt.Errorf("Unable to get contract relationships list")
 					}
-					apiTemplateName := models.StripQuotes(tempCont.S("name").String())
-					if apiTemplateName == "Template1" {
-						externalepgCount, err := tempCont.ArrayCount("externalEpgs")
+					for k := 0; k < crefCount; k++ {
+						crefCont, err := epgCont.ArrayElement(k, "contractRelationships")
 						if err != nil {
-							return fmt.Errorf("Unable to get External epg list")
+							return err
 						}
-						for j := 0; j < externalepgCount; j++ {
-							epgCont, err := tempCont.ArrayElement(j, "externalEpgs")
-							if err != nil {
-								return err
-							}
-							apiExternalepg := models.StripQuotes(epgCont.S("name").String())
-							if apiExternalepg == "UntitledExternalEPG1" {
-								contractCount, err := epgCont.ArrayCount("contractRelationships")
-								if err != nil {
-									return fmt.Errorf("Unable to get contract Relationships list")
-								}
-								for k := 0; k < contractCount; k++ {
-									contractCont, err := epgCont.ArrayElement(k, "contractRelationships")
-									if err != nil {
-
-										return err
-									}
-									contractRef := models.StripQuotes(contractCont.S("contractRef").String())
-									re := regexp.MustCompile("/schemas/(.*)/templates/(.*)/contracts/(.*)")
-									split := re.FindStringSubmatch(contractRef)
-									if "contract9999" == fmt.Sprintf("%s", split[3]) {
-										return fmt.Errorf("External Epg Contract still exists")
-									}
-								}
-							}
+						contractRef := models.StripQuotes(crefCont.S("contractRef").String())
+						re := regexp.MustCompile("/schemas/(.*)/templates/(.*)/contracts/(.*)")
+						match := re.FindStringSubmatch(contractRef)
+						if len(match) > 3 && match[3] == rs.Primary.Attributes["contract_name"] {
+							return fmt.Errorf("Schema Template External EPG Contract still exists")
 						}
 					}
 				}
@@ -199,18 +193,4 @@ func testAccCheckMSOSchemaTemplateExternalepgContractDestroy(s *terraform.State)
 		}
 	}
 	return nil
-}
-func testAccCheckMSOSchemaTemplateExternalepgContractAttributes(name string, ss *TemplateExternalepgContract) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		if name != ss.relation {
-			return fmt.Errorf("Bad Template External epg Contract Relationship Type %s", ss.relation)
-		}
-
-		return nil
-	}
-}
-
-type TemplateExternalepgContract struct {
-	name     string
-	relation string
 }

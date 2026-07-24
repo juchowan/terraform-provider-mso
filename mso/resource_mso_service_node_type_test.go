@@ -6,137 +6,120 @@ import (
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
-func TestAccMsoServiceNodeType_Basic(t *testing.T) {
-	var s ServiceNodeTypeTest
+var msoServiceNodeTypeId string
+
+func TestAccMSOServiceNodeTypeResource(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckMsoServiceNodeTypeDestroy,
+		CheckDestroy: testAccCheckMSOServiceNodeTypeDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCheckMsoServiceNodeTypeConfig_basic("acctest"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMsoServiceNodeTypeExists("mso_service_node_type.node_type", &s),
-					testAccCheckMsoServiceNodeTypeAttributes("acctest", &s),
+				PreConfig: func() { fmt.Println("Test: Create Service Node Type") },
+				Config:    testAccMSOServiceNodeTypeConfigCreate(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("mso_service_node_type.test", "name", msoServiceNodeTypeName),
+					// display_name defaults to name when not explicitly set
+					resource.TestCheckResourceAttr("mso_service_node_type.test", "display_name", msoServiceNodeTypeName),
+					func(s *terraform.State) error {
+						rs, ok := s.RootModule().Resources["mso_service_node_type.test"]
+						if !ok {
+							return fmt.Errorf("mso_service_node_type.test not found in state")
+						}
+						msoServiceNodeTypeId = rs.Primary.ID
+						return nil
+					},
 				),
+			},
+			{
+				PreConfig:    func() { fmt.Println("Test: Import Service Node Type") },
+				ResourceName: "mso_service_node_type.test",
+				ImportState:  true,
+				// The importer looks up by name, so we must pass the name as the import ID.
+				ImportStateIdFunc: func(s *terraform.State) (string, error) {
+					rs, ok := s.RootModule().Resources["mso_service_node_type.test"]
+					if !ok {
+						return "", fmt.Errorf("mso_service_node_type.test not found in state")
+					}
+					return rs.Primary.Attributes["name"], nil
+				},
+				ImportStateVerify: true,
+			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Recreate Service Node Type with explicit display name after manual deletion")
+					c := testAccProvider.Meta().(*client.Client)
+					if err := c.DeletebyId("api/v1/schemas/service-node-types/" + msoServiceNodeTypeId); err != nil {
+						t.Fatalf("Failed to delete service node type %s via API: %s", msoServiceNodeTypeId, err)
+					}
+				},
+				Config: testAccMSOServiceNodeTypeConfigCreateWithDisplayName(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("mso_service_node_type.test", "name", msoServiceNodeTypeName),
+					resource.TestCheckResourceAttr("mso_service_node_type.test", "display_name", msoServiceNodeTypeName+" display"),
+				),
+			},
+			{
+				PreConfig:    func() { fmt.Println("Test: Import Service Node Type with explicit display name") },
+				ResourceName: "mso_service_node_type.test",
+				ImportState:  true,
+				ImportStateIdFunc: func(s *terraform.State) (string, error) {
+					rs, ok := s.RootModule().Resources["mso_service_node_type.test"]
+					if !ok {
+						return "", fmt.Errorf("mso_service_node_type.test not found in state")
+					}
+					return rs.Primary.Attributes["name"], nil
+				},
+				ImportStateVerify: true,
 			},
 		},
 	})
 }
 
-func testAccCheckMsoServiceNodeTypeConfig_basic(name string) string {
-	return fmt.Sprintf(`
-	resource "mso_service_node_type" "node_type" {
-		name = "%v"
-		display_name = "%v"
-	  }
-	`, name, name)
-}
-
-func testAccCheckMsoServiceNodeTypeExists(tenantName string, st *ServiceNodeTypeTest) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		rs1, err1 := s.RootModule().Resources[tenantName]
-
-		if !err1 {
-			return fmt.Errorf("Service Node Type record %s not found", tenantName)
+func testAccCheckMSOServiceNodeTypeDestroy(s *terraform.State) error {
+	c := testAccProvider.Meta().(*client.Client)
+	cont, err := c.GetViaURL("api/v1/schemas/service-node-types")
+	if err != nil {
+		return err
+	}
+	nodesCount, err := cont.ArrayCount("serviceNodeTypes")
+	if err != nil {
+		return err
+	}
+	for _, rs := range s.RootModule().Resources {
+		if rs.Type != "mso_service_node_type" {
+			continue
 		}
-		if rs1.Primary.ID == "" {
-			return fmt.Errorf("No Service Node Type record id was set")
-		}
-		typeId := rs1.Primary.ID
-		found := false
-
-		stvt := ServiceNodeTypeTest{}
-		msoClient := testAccProvider.Meta().(*client.Client)
-
-		cont, err := msoClient.GetViaURL("api/v1/schemas/service-node-types")
-		if err != nil {
-			return err
-		}
-
-		nodesCount, err := cont.ArrayCount("serviceNodeTypes")
-		if err != nil {
-			return err
-		}
-
 		for i := 0; i < nodesCount; i++ {
 			nodeCont, err := cont.ArrayElement(i, "serviceNodeTypes")
 			if err != nil {
 				return err
 			}
-
-			apiId := models.StripQuotes(nodeCont.S("id").String())
-
-			if apiId == typeId {
-				stvt.Id = apiId
-				stvt.Name = models.StripQuotes(nodeCont.S("name").String())
-				stvt.DisplayName = models.StripQuotes(nodeCont.S("displayName").String())
-				found = true
+			if models.StripQuotes(nodeCont.S("id").String()) == rs.Primary.ID {
+				return fmt.Errorf("Service Node Type %s still exists", rs.Primary.ID)
 			}
-		}
-		if !found {
-			return fmt.Errorf("Unable to find service node type %s", typeId)
-		}
-
-		stv := &stvt
-		*st = *stv
-		return nil
-	}
-}
-
-func testAccCheckMsoServiceNodeTypeDestroy(s *terraform.State) error {
-	msoClient := testAccProvider.Meta().(*client.Client)
-
-	for _, rs := range s.RootModule().Resources {
-
-		if rs.Type == "mso_service_node_type" {
-			typeId := rs.Primary.ID
-			cont, err := msoClient.GetViaURL("api/v1/schemas/service-node-types")
-			if err != nil {
-				return err
-			}
-
-			nodesCount, err := cont.ArrayCount("serviceNodeTypes")
-			if err != nil {
-				return err
-			}
-
-			for i := 0; i < nodesCount; i++ {
-				nodeCont, err := cont.ArrayElement(i, "serviceNodeTypes")
-				if err != nil {
-					return err
-				}
-
-				apiId := models.StripQuotes(nodeCont.S("id").String())
-
-				if apiId == typeId {
-
-					return fmt.Errorf("Service Node Type still exists %s", typeId)
-
-				}
-			}
-
-		} else {
-			continue
 		}
 	}
 	return nil
 }
-func testAccCheckMsoServiceNodeTypeAttributes(name string, st *ServiceNodeTypeTest) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		if name != st.Name {
-			return fmt.Errorf("Bad Service Type Name %s", st.Name)
-		}
-		return nil
-	}
+
+func testAccMSOServiceNodeTypeConfigCreate() string {
+	return fmt.Sprintf(`
+resource "mso_service_node_type" "test" {
+  name = "%s"
+}
+`, msoServiceNodeTypeName)
 }
 
-type ServiceNodeTypeTest struct {
-	Id          string
-	Name        string
-	DisplayName string
+func testAccMSOServiceNodeTypeConfigCreateWithDisplayName() string {
+	return fmt.Sprintf(`
+resource "mso_service_node_type" "test" {
+  name         = "%s"
+  display_name = "%s display"
+}
+`, msoServiceNodeTypeName, msoServiceNodeTypeName)
 }

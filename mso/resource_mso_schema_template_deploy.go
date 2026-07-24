@@ -6,8 +6,8 @@ import (
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func resourceMSOSchemaTemplateDeploy() *schema.Resource {
@@ -53,6 +53,7 @@ func resourceMSOSchemaTemplateDeploy() *schema.Resource {
 				ValidateFunc: validation.StringLenBetween(1, 1000),
 			},
 		}),
+		DeprecationMessage: "mso_schema_template_deploy is deprecated: use mso_schema_template_deploy_ndo instead for ND-based NDO (NDO 3.2+).",
 	}
 }
 

@@ -11,8 +11,24 @@ MSO Provider
 
 Cisco ACI Multi-Site Orchestrator (MSO) / Nexus Dashboard Orchestrator (NDO) is responsible for provisioning, health monitoring, and managing the full lifecycle of Cisco ACI networking policies and tenant policies across Cisco ACI sites around the world. Terraform provider MSO is a Terraform plugin which will be used to manage the MSO Fabric Constructs on the Cisco MSO platform with leveraging advantages of Terraform. The provider needs to be configured with the proper credentials before it can be used.
 
-> [!NOTE]
-> Cisco NDO 4.2(2) introduces a change in behavior to Schema IDs, which impacts existing Terraform state files. When upgrading, all managed resources must be re-imported. Please refer to the [4.2(2) release notes](https://www.cisco.com/c/en/us/td/docs/dcn/ndo/4x/release-notes/cisco-nexus-dashboard-orchestrator-release-notes-422.html#ChangesinBehavior) for behavioral changes.
+!> Cisco NDO 4.2(2) introduces a change in behavior to Schema IDs, which impacts existing Terraform state files. When upgrading, all managed resources must be re-imported. Please refer to the [4.2(2) release notes](https://www.cisco.com/c/en/us/td/docs/dcn/ndo/4x/release-notes/cisco-nexus-dashboard-orchestrator-release-notes-422.html#ChangesinBehavior) for behavioral changes.
+
+Limitations
+--------------
+
+When creating, updating, or destroying multiple instances of the same resource type within the same template, use [`-parallelism=1`](https://developer.hashicorp.com/terraform/cli/commands/apply#parallelism-n) to avoid index conflicts in the MSO API:
+
+```sh
+terraform apply -parallelism=1
+```
+
+or
+
+```sh
+terraform destroy -parallelism=1
+```
+
+To avoid setting this flag on every command, you can configure it persistently using the [`TF_CLI_ARGS` or `TF_CLI_ARGS_name` environment variables](https://developer.hashicorp.com/terraform/cli/config/environment-variables#tf_cli_args-and-tf_cli_args_name).
 
 Authentication
 --------------

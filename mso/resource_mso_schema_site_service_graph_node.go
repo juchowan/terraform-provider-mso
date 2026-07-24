@@ -8,8 +8,8 @@ import (
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func resourceMSOSchemaSiteServiceGraphNode() *schema.Resource {
@@ -79,7 +79,7 @@ func resourceMSOSchemaSiteServiceGraphNode() *schema.Resource {
 				},
 			},
 		}),
-		DeprecationMessage: "This resource is deprecated. Use mso_schema_site_service_graph resource instead",
+		DeprecationMessage: "mso_schema_site_service_graph_node is deprecated: use mso_schema_site_service_graph instead.",
 	}
 }
 

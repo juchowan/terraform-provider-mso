@@ -6,7 +6,7 @@ import (
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 func datasourceMSOLabel() *schema.Resource {
@@ -26,6 +26,7 @@ func datasourceMSOLabel() *schema.Resource {
 				Computed: true,
 			},
 		}),
+		DeprecationMessage: nd32DeprecationMessage("mso_label"),
 	}
 }
 

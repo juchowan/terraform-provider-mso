@@ -5,8 +5,8 @@ import (
 	"log"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func dataSourceMSOSchemaSiteContractServiceGraph() *schema.Resource {
@@ -102,13 +102,14 @@ func dataSourceMSOSchemaSiteContractServiceGraphRead(d *schema.ResourceData, m i
 	}
 
 	d.SetId(fmt.Sprintf("%s/sites/%s/templates/%s/contracts/%s", schemaID, siteID, templateName, contractName))
-	if err != nil {
-		return errorForObjectNotFound(err, d.Id(), cont, d)
-	}
 
 	err = setSiteContractServiceGraphAttrs(cont, d)
 	if err != nil {
 		return err
+	}
+
+	if d.Id() == "" {
+		return fmt.Errorf("No service graph found for contract %s in site %s", contractName, siteID)
 	}
 
 	log.Printf("[DEBUG] %s: Datasource read finished successfully", d.Id())

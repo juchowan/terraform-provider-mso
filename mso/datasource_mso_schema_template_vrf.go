@@ -7,8 +7,8 @@ import (
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func datasourceMSOSchemaTemplateVrf() *schema.Resource {
@@ -178,6 +178,7 @@ func datasourceMSOSchemaTemplateVrfRead(d *schema.ResourceData, m interface{}) e
 
 	if !found {
 		d.SetId("")
+		return fmt.Errorf("Unable to find the VRF %s in Template %s of Schema Id %s ", vrfName, templateName, schemaId)
 	}
 	log.Printf("[DEBUG] %s: Read finished successfully", d.Id())
 	return nil

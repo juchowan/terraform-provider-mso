@@ -8,6 +8,8 @@ description: |-
 
 # mso_tenant #
 
+!> **Deprecated** This resource is deprecated as of Nexus Dashboard (ND) 4.3 / NDO 5.3: no longer functional on ND 4.4+ / NDO 5.4+ and will be removed once ND 4.3 / NDO 5.3 is no longer supported.
+
 Manages MSO Tenant
 
 ## Example Usage ##
@@ -97,7 +99,10 @@ resource "mso_tenant" "tenant4" {
 ## Argument Reference ##
 
 * `name` - (Required) The name of the tenant.
-* `display_name` - (Required) The name of the tenant to be displayed in the web UI.
+* `display_name` - (Optional) **Deprecated** The name of the tenant to be displayed in the web UI. When omitted on create it defaults to the value of `name`; on update the previously stored value is retained in state and sent back to the server on every PUT, so ensure `display_name` still matches `name` before any update or delete that modifies `site_associations`.
+
+  !> **Deprecated Warning:** On Nexus Dashboard 4.2+ `display_name` must equal `name` — the API rejects any update that modifies `site_associations` otherwise. Do not set `display_name`; let it default to `name` on create, and ensure it still matches `name` before any update or delete that modifies `site_associations`.
+
 * `description` - (Optional) The description for this tenant.
 * `orchestrator_only` - (Optional) Option to delete this tenant only from orchestrator or not. Default value is "false".
 * `user_associations` - (Optional) A list of associated users for this tenant.

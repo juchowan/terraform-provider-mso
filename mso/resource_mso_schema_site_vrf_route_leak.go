@@ -8,16 +8,17 @@ import (
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func resourceMSOSchemaSiteVrfRouteLeak() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceMSOSchemaSiteVrfRouteLeakCreate,
-		Update: resourceMSOSchemaSiteVrfRouteLeakUpdate,
-		Read:   resourceMSOSchemaSiteVrfRouteLeakRead,
-		Delete: resourceMSOSchemaSiteVrfRouteLeakDelete,
+		DeprecationMessage: cloudDeprecationMessage("mso_schema_site_vrf_route_leak"),
+		Create:             resourceMSOSchemaSiteVrfRouteLeakCreate,
+		Update:             resourceMSOSchemaSiteVrfRouteLeakUpdate,
+		Read:               resourceMSOSchemaSiteVrfRouteLeakRead,
+		Delete:             resourceMSOSchemaSiteVrfRouteLeakDelete,
 
 		Importer: &schema.ResourceImporter{
 			State: resourceMSOSchemaSiteVrfRouteLeakImport,

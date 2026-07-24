@@ -1,3 +1,7 @@
+// NOTE: Acceptance tests for this resource are intentionally not provided.
+// Exercising this resource requires a cloud site (AWS/Azure/GCP) attached
+// to the MSO/ND test fabric, which is not part of the CI test environment.
+
 package mso
 
 import (
@@ -10,16 +14,17 @@ import (
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func resourceMSOSchemaSiteVrfRegionCidr() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceMSOSchemaSiteVrfRegionCidrCreate,
-		Update: resourceMSOSchemaSiteVrfRegionCidrUpdate,
-		Read:   resourceMSOSchemaSiteVrfRegionCidrRead,
-		Delete: resourceMSOSchemaSiteVrfRegionCidrDelete,
+		DeprecationMessage: cloudDeprecationMessage("mso_schema_site_vrf_region_cidr"),
+		Create:             resourceMSOSchemaSiteVrfRegionCidrCreate,
+		Update:             resourceMSOSchemaSiteVrfRegionCidrUpdate,
+		Read:               resourceMSOSchemaSiteVrfRegionCidrRead,
+		Delete:             resourceMSOSchemaSiteVrfRegionCidrDelete,
 
 		Importer: &schema.ResourceImporter{
 			State: resourceMSOSchemaSiteVrfRegionCidrImport,

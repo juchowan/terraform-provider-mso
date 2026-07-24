@@ -9,9 +9,13 @@ import (
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
+
+// Deprecated: a contract must always be associated with at least one filter, and mso_schema_template_contract
+// cannot be created without a filter_relationship, so this resource conflicts with the inline filter_relationship
+// attribute of mso_schema_template_contract. Use that block instead.
 
 func resourceMSOTemplateContractFilter() *schema.Resource {
 	return &schema.Resource{
@@ -109,6 +113,7 @@ func resourceMSOTemplateContractFilter() *schema.Resource {
 				}, false),
 			},
 		}),
+		DeprecationMessage: "mso_schema_template_contract_filter is deprecated: use the filter_relationship block on mso_schema_template_contract instead.",
 	}
 }
 

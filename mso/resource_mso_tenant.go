@@ -8,8 +8,8 @@ import (
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func resourceMSOTenant() *schema.Resource {
@@ -35,8 +35,15 @@ func resourceMSOTenant() *schema.Resource {
 
 			"display_name": &schema.Schema{
 				Type:         schema.TypeString,
-				Required:     true,
+				Optional:     true,
+				Computed:     true,
 				ValidateFunc: validation.StringLenBetween(1, 1000),
+				Deprecated: "On Nexus Dashboard 4.2+ display_name must equal name; the " +
+					"API rejects site_associations updates otherwise. Do not set " +
+					"display_name on create. When omitted on create it defaults to name; " +
+					"on update the previously stored value is retained in state and sent " +
+					"back to the server on every PUT, so ensure display_name still matches " +
+					"name before any update or delete that modifies site_associations.",
 			},
 
 			"description": &schema.Schema{
@@ -203,6 +210,7 @@ func resourceMSOTenant() *schema.Resource {
 				Computed: true,
 			},
 		}),
+		DeprecationMessage: "mso_tenant is deprecated as of Nexus Dashboard (ND) 4.3 / NDO 5.3: no longer functional on ND 4.4+ / NDO 5.4+ and will be removed once ND 4.3 / NDO 5.3 is no longer supported.",
 	}
 }
 
@@ -376,6 +384,8 @@ func resourceMSOTenantCreate(d *schema.ResourceData, m interface{}) error {
 
 	if display_name, ok := d.GetOk("display_name"); ok {
 		tenantAttr.DisplayName = display_name.(string)
+	} else {
+		tenantAttr.DisplayName = tenantAttr.Name
 	}
 
 	if description, ok := d.GetOk("description"); ok {

@@ -7,8 +7,8 @@ import (
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func datasourceMSOSchemaSiteAnpEpgStaticPort() *schema.Resource {
@@ -152,7 +152,7 @@ func datasourceMSOSchemaSiteAnpEpgStaticPortRead(d *schema.ResourceData, m inter
 			found = true
 			d.SetId(fmt.Sprintf("%s/sites/%s-%s/anps/%s/epgs/%s/staticPorts/%s", schemaId, siteId, templateName, anp, epg, portPath))
 			if portCont.Exists("type") {
-				d.Set("type", models.StripQuotes(portCont.S("type").String()))
+				d.Set("path_type", models.StripQuotes(portCont.S("type").String()))
 			}
 			if portCont.Exists("path") {
 				d.Set("pod", pod)

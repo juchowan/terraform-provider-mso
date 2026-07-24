@@ -5,8 +5,8 @@ import (
 	"log"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func dataSourceMSOTemplateContractFilter() *schema.Resource {
@@ -72,6 +72,7 @@ func dataSourceMSOTemplateContractFilter() *schema.Resource {
 				Computed: true,
 			},
 		}),
+		DeprecationMessage: "mso_schema_template_contract_filter is deprecated: use the filter_relationship attribute on mso_schema_template_contract instead.",
 	}
 }
 

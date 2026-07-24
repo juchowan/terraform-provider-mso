@@ -7,8 +7,8 @@ import (
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func datasourceMSOTenant() *schema.Resource {
@@ -134,6 +134,7 @@ func datasourceMSOTenant() *schema.Resource {
 				Computed: true,
 			},
 		}),
+		DeprecationMessage: "mso_tenant is deprecated as of Nexus Dashboard (ND) 4.3 / NDO 5.3: no longer functional on ND 4.4+ / NDO 5.4+ and will be removed once ND 4.3 / NDO 5.3 is no longer supported.",
 	}
 }
 

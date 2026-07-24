@@ -8,8 +8,8 @@ import (
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func resourceMSOSchemaTemplateContractServiceChaining() *schema.Resource {
@@ -327,7 +327,7 @@ func setServiceChainingFromSchema(d *schema.ResourceData, schemaCont *container.
 	serviceChainingIface, ok := contractDetails["serviceChaining"]
 	if !ok || serviceChainingIface == nil {
 		d.SetId("")
-		return fmt.Errorf("serviceChaining not found in contract %s", contractName)
+		return nil
 	}
 
 	serviceChain, ok := serviceChainingIface.(map[string]interface{})

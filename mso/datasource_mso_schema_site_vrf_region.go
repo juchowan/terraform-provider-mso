@@ -1,3 +1,7 @@
+// NOTE: Acceptance tests for this data source are intentionally not provided.
+// Exercising this data source requires a cloud site (AWS/Azure/GCP) attached
+// to the MSO/ND test fabric, which is not part of the CI test environment.
+
 package mso
 
 import (
@@ -5,13 +9,14 @@ import (
 	"log"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func dataSourceMSOSchemaSiteVrfRegion() *schema.Resource {
 	return &schema.Resource{
-		Read: dataSourceMSOSchemaSiteVrfRegionRead,
+		DeprecationMessage: cloudDeprecationMessage("mso_schema_site_vrf_region"),
+		Read:               dataSourceMSOSchemaSiteVrfRegionRead,
 
 		SchemaVersion: version,
 
@@ -52,18 +57,8 @@ func dataSourceMSOSchemaSiteVrfRegion() *schema.Resource {
 			"hub_network": &schema.Schema{
 				Type:     schema.TypeMap,
 				Computed: true,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"name": &schema.Schema{
-							Type:     schema.TypeString,
-							Computed: true,
-						},
-						"tenant_name": &schema.Schema{
-							Type:     schema.TypeString,
-							Computed: true,
-						},
-					},
-				},
+				// SDKv2 does not support Elem with schema.Resource on TypeMap fields.
+				// Expected keys: "name" (string), "tenant_name" (string). Validation skipped - resource is deprecated.
 			},
 			"cidr": &schema.Schema{
 				Type:     schema.TypeList,

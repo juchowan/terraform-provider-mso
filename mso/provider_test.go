@@ -11,29 +11,25 @@ import (
 	"testing"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
-var testAccProviders map[string]terraform.ResourceProvider
+var testAccProviders map[string]*schema.Provider
 var testAccProvider *schema.Provider
 
 func init() {
-	testAccProvider = Provider().(*schema.Provider)
-	testAccProviders = map[string]terraform.ResourceProvider{
+	testAccProvider = Provider()
+	testAccProviders = map[string]*schema.Provider{
 		"mso": testAccProvider,
 	}
 }
 
 func TestProvider(t *testing.T) {
-	if err := Provider().(*schema.Provider).InternalValidate(); err != nil {
+	if err := Provider().InternalValidate(); err != nil {
 		t.Fatalf("err: %s", err)
 	}
-}
-
-func TestProvider_impl(t *testing.T) {
-	var _ terraform.ResourceProvider = Provider()
 }
 
 var (
@@ -158,6 +154,24 @@ func testAccVerifyKeyValue(resourceAttrsMap *map[string]string, resourceAttrRoot
 	}
 }
 
+func testCheckTypeSetStringElemAttr(resourceName, setKey, value string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("resource not found: %s", resourceName)
+		}
+		prefix := setKey + "."
+		for k, v := range rs.Primary.Attributes {
+			if strings.HasPrefix(k, prefix) && !strings.HasSuffix(k, ".#") && v == value {
+				return nil
+			}
+		}
+		return fmt.Errorf("no element with value %q found in set %q", value, setKey)
+	}
+}
+
+// Deprecated: This check has a bug because it matches key value pairs across different set elements instead of verifying all attributes
+// belong to the same set element, leading to false positives. Use CustomTestCheckTypeSetElemAttrs instead.
 func customTestCheckResourceTypeSetAttr(resourceName, resourceAttrRootkey string, resourceAttrsMap map[string]string) resource.TestCheckFunc {
 	return func(is *terraform.State) error {
 		rootModule, err := is.RootModule().Resources[resourceName]
@@ -177,12 +191,37 @@ func customTestCheckResourceTypeSetAttr(resourceName, resourceAttrRootkey string
 	}
 }
 
+// resolveStateReference resolves a value that looks like a Terraform resource reference
+// (e.g. "resource_type.resource_name.attribute") by looking up the actual value in state.
+// If the value does not match this pattern or the referenced resource/attribute is not found,
+// the original value is returned unchanged.
+func resolveStateReference(s *terraform.State, value string) string {
+	parts := strings.SplitN(value, ".", 3)
+	if len(parts) != 3 {
+		return value
+	}
+	resourceKey := parts[0] + "." + parts[1]
+	attrName := parts[2]
+	if rs, ok := s.RootModule().Resources[resourceKey]; ok {
+		if attrVal, ok := rs.Primary.Attributes[attrName]; ok {
+			return attrVal
+		}
+	}
+	return value
+}
+
 func CustomTestCheckTypeSetElemAttrs(resourceName, setName string, attrsToCheck map[string]string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[resourceName]
 		if !ok {
 			return fmt.Errorf("Resource not found: %s", resourceName)
 		}
+
+		resolvedAttrs := make(map[string]string, len(attrsToCheck))
+		for k, v := range attrsToCheck {
+			resolvedAttrs[k] = resolveStateReference(s, v)
+		}
+
 		groupedAttrs := make(map[string]map[string]string)
 		re := regexp.MustCompile(fmt.Sprintf(`^%s\.(\d+)\.(.*)$`, setName))
 
@@ -198,25 +237,160 @@ func CustomTestCheckTypeSetElemAttrs(resourceName, setName string, attrsToCheck 
 			}
 		}
 
+		// Numeric path segments in expected keys (e.g. "pbr_destination.0.ip")
+		// are treated as wildcards so the same expected key can match a nested
+		// TypeSet whose real index is a hash. Keys without numeric segments
+		// keep the original exact-match lookup.
+		keyMatchers := make(map[string]*regexp.Regexp, len(resolvedAttrs))
+		for expectedKey := range resolvedAttrs {
+			parts := strings.Split(expectedKey, ".")
+			patternParts := make([]string, len(parts))
+			hasNumericSegment := false
+			for i, p := range parts {
+				if _, err := strconv.Atoi(p); err == nil {
+					patternParts[i] = `\d+`
+					hasNumericSegment = true
+				} else {
+					patternParts[i] = regexp.QuoteMeta(p)
+				}
+			}
+			if hasNumericSegment {
+				keyMatchers[expectedKey] = regexp.MustCompile("^" + strings.Join(patternParts, `\.`) + "$")
+			}
+		}
+
 		for _, elemAttrs := range groupedAttrs {
 			match := true
-			for expectedKey, expectedVal := range attrsToCheck {
+			for expectedKey, expectedVal := range resolvedAttrs {
 				if val, ok := elemAttrs[expectedKey]; ok {
 					if fmt.Sprintf("%v", val) != expectedVal {
 						match = false
 						break
 					}
-				} else {
+					continue
+				} else if expectedVal != "" {
+					// SDKv2 omits zero-value Optional fields (empty string, false) from
+					// TypeSet element flat state. Treat an absent key as matching only
+					// when the expected value is also the zero value ("").
 					match = false
 					break
 				}
+				if matcher, ok := keyMatchers[expectedKey]; ok {
+					found := false
+					for k, v := range elemAttrs {
+						if matcher.MatchString(k) && fmt.Sprintf("%v", v) == expectedVal {
+							found = true
+							break
+						}
+					}
+					if !found {
+						match = false
+						break
+					}
+					continue
+				}
+				match = false
+				break
 			}
 
 			if match {
 				return nil
 			}
 		}
-		return fmt.Errorf("No element in set '%s' found with the following attributes: %v", setName, attrsToCheck)
+		return fmt.Errorf("No element in set '%s' found with the following attributes: %v\nResolved to: %v\nState attributes for resource: %v", setName, attrsToCheck, resolvedAttrs, rs.Primary.Attributes)
+	}
+}
+
+// testAccVersionCheck skips the test if the NDO version is older than minVersion.
+// Must be called after testAccPreCheck in the same PreCheck function.
+// minVersion should be a version string like "5.1" or "4.0.0.0".
+func testAccVersionCheck(t *testing.T, minVersion string) {
+	t.Helper()
+	result, err := msoClientTest.CompareVersion(minVersion)
+	if err != nil {
+		t.Skipf("Skipping: could not determine NDO version: %s", err)
+	}
+	if result > 0 {
+		t.Skipf("Skipping: requires NDO >= %s", minVersion)
+	}
+}
+
+// CustomTestCheckCollectionElemAttrsByKeys locates the TypeSet element whose
+// attributes match every key/value pair in matchAttrs and compares every key
+// in attrsToCheck against the value stored in state, producing a
+// per-attribute diff. Unlike CustomTestCheckTypeSetElemAttrs, which only
+// reports "no element matched the whole map", this helper pinpoints exactly
+// which attribute(s) differ — useful when an upstream server silently coerces
+// a subset of fields and the test just needs to see which ones. Both
+// matchAttrs values and attrsToCheck values are resolved through
+// resolveStateReference so they can refer to other resources in state.
+func CustomTestCheckCollectionElemAttrsByKeys(resourceName, setName string, matchAttrs, attrsToCheck map[string]string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("Resource not found: %s", resourceName)
+		}
+		if len(matchAttrs) == 0 {
+			return fmt.Errorf("matchAttrs must contain at least one key/value pair")
+		}
+
+		resolvedMatch := make(map[string]string, len(matchAttrs))
+		for k, v := range matchAttrs {
+			resolvedMatch[k] = resolveStateReference(s, v)
+		}
+		resolvedAttrs := make(map[string]string, len(attrsToCheck))
+		for k, v := range attrsToCheck {
+			resolvedAttrs[k] = resolveStateReference(s, v)
+		}
+
+		groupedAttrs := make(map[string]map[string]string)
+		re := regexp.MustCompile(fmt.Sprintf(`^%s\.(\d+)\.(.*)$`, regexp.QuoteMeta(setName)))
+		for key, val := range rs.Primary.Attributes {
+			if m := re.FindStringSubmatch(key); len(m) == 3 {
+				hash := m[1]
+				if _, ok := groupedAttrs[hash]; !ok {
+					groupedAttrs[hash] = make(map[string]string)
+				}
+				groupedAttrs[hash][m[2]] = val
+			}
+		}
+
+		var matchingHashes []string
+		for hash, elemAttrs := range groupedAttrs {
+			allMatch := true
+			for mk, mv := range resolvedMatch {
+				if av, ok := elemAttrs[mk]; !ok || av != mv {
+					allMatch = false
+					break
+				}
+			}
+			if allMatch {
+				matchingHashes = append(matchingHashes, hash)
+			}
+		}
+
+		if len(matchingHashes) == 0 {
+			return fmt.Errorf("%s element matching %v not found in state", setName, resolvedMatch)
+		}
+		if len(matchingHashes) > 1 {
+			return fmt.Errorf("%s element match %v is ambiguous: %d elements matched, refine matchAttrs", setName, resolvedMatch, len(matchingHashes))
+		}
+
+		elemAttrs := groupedAttrs[matchingHashes[0]]
+		var diffs []string
+		for ek, ev := range resolvedAttrs {
+			av, present := elemAttrs[ek]
+			switch {
+			case !present:
+				diffs = append(diffs, fmt.Sprintf("%s: expected %q, missing in state", ek, ev))
+			case av != ev:
+				diffs = append(diffs, fmt.Sprintf("%s: expected %q, got %q", ek, ev, av))
+			}
+		}
+		if len(diffs) > 0 {
+			return fmt.Errorf("%s element %v mismatches:\n  %s", setName, resolvedMatch, strings.Join(diffs, "\n  "))
+		}
+		return nil
 	}
 }
 

@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 )
 
 func TestAccMSOSchemaTemplateAnpDatasource(t *testing.T) {
@@ -15,6 +15,11 @@ func TestAccMSOSchemaTemplateAnpDatasource(t *testing.T) {
 		CheckDestroy: testAccCheckMSOSchemaTemplateAnpDestroy,
 		Steps: []resource.TestStep{
 			{
+				PreConfig:   func() { fmt.Println("Test: Read ANP datasource not found error") },
+				Config:      testAccMSOSchemaTemplateAnpDatasourceNotFound(),
+				ExpectError: regexp.MustCompile("Unable to find the ANP"),
+			},
+			{
 				PreConfig: func() { fmt.Println("Test: Read ANP datasource") },
 				Config:    testAccMSOSchemaTemplateAnpDatasource(),
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -23,11 +28,6 @@ func TestAccMSOSchemaTemplateAnpDatasource(t *testing.T) {
 					resource.TestCheckResourceAttr("data.mso_schema_template_anp.anp", "name", msoSchemaTemplateAnpName),
 					resource.TestCheckResourceAttr("data.mso_schema_template_anp.anp", "display_name", msoSchemaTemplateAnpName),
 				),
-			},
-			{
-				PreConfig:   func() { fmt.Println("Test: Read ANP datasource not found error") },
-				Config:      testAccMSOSchemaTemplateAnpDatasourceNotFound(),
-				ExpectError: regexp.MustCompile("Unable to find the ANP"),
 			},
 		},
 	})

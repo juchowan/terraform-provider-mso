@@ -6,8 +6,8 @@ import (
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func datasourceMSOSchemaTemplate() *schema.Resource {
@@ -59,7 +59,11 @@ func datasourceMSOSchemaTemplateRead(d *schema.ResourceData, m interface{}) erro
 		return err
 	}
 
-	data := cont.S("templates").Data().([]interface{})
+	templateData := cont.S("templates").Data()
+	if templateData == nil {
+		return fmt.Errorf("Template of specified name not found")
+	}
+	data := templateData.([]interface{})
 	var flag bool
 	var count int
 	for _, info := range data {

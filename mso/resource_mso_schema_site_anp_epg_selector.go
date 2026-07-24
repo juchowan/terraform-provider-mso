@@ -1,3 +1,7 @@
+// NOTE: Acceptance tests for this resource are intentionally not provided.
+// Exercising this resource requires a cloud site (AWS/Azure/GCP) attached
+// to the MSO/ND test fabric, which is not part of the CI test environment.
+
 package mso
 
 import (
@@ -8,16 +12,17 @@ import (
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func resourceMSOSchemaSiteAnpEpgSelector() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceSchemaSiteApnEpgSelectorCreate,
-		Update: resourceSchemaSiteApnEpgSelectorUpdate,
-		Read:   resourceSchemaSiteApnEpgSelectorRead,
-		Delete: resourceSchemaSiteApnEpgSelectorDelete,
+		DeprecationMessage: cloudDeprecationMessage("mso_schema_site_anp_epg_selector"),
+		Create:             resourceSchemaSiteApnEpgSelectorCreate,
+		Update:             resourceSchemaSiteApnEpgSelectorUpdate,
+		Read:               resourceSchemaSiteApnEpgSelectorRead,
+		Delete:             resourceSchemaSiteApnEpgSelectorDelete,
 
 		Importer: &schema.ResourceImporter{
 			State: resourceSchemaSiteApnEpgSelectorImport,

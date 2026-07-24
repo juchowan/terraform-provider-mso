@@ -3,246 +3,265 @@ package mso
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
-func TestAccMSOSchemaSiteAnpEpgSubnet_Basic(t *testing.T) {
-	var ss SchemaSiteAnpEpgSubnet
+// TestAccMSOSchemaSiteAnpEpgSubnetResource exercises the lifecycle of
+// mso_schema_site_anp_epg_subnet:
+//   - attempt to create a subnet on a site that has no mso_schema_site
+//     association (expect error)
+//   - create the subnet with all mutable attributes set
+//   - update the subnet including clearing description back to ""
+//   - import the subnet
+//
+// primary is intentionally skipped: fabric-local EPGs do
+// not allow subnets to be marked as primary — NDO rejects the PATCH with
+// "Fabric local EPG Subnet cannot be marked as primary".
+//
+// querier is intentionally skipped: it is only supported for Bridge Domain
+// subnets — NDO rejects the PATCH with "'Querier' is only supported for
+// Bridge Domain subnets". This attribute is a deprecation candidate.
+//
+// The lab must have the `ansible_test` and `ansible_test_2` sites onboarded.
+func TestAccMSOSchemaSiteAnpEpgSubnetResource(t *testing.T) {
+	subnetResource := "mso_schema_site_anp_epg_subnet." + msoSchemaTemplateAnpEpgName
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckMSOSchemaSiteAnpEpgSubnetDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCheckMSOSiteAnpEpgSubnetConfig_basic("private"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMSOSchemaSiteAnpEpgSubnetExists("mso_schema_site_anp_epg_subnet.subnet1", &ss),
-					testAccCheckMSOSchemaSiteAnpEpgSubnetAttributes("private", &ss),
+				PreConfig: func() {
+					fmt.Println("Test: Create subnet without mso_schema_site association (expect error)")
+				},
+				Config: testAccMSOSchemaSiteAnpEpgSubnetConfigNoSiteAssociation(),
+				// Older NDO rejects the PATCH with "Resource Not Found". Newer
+				// NDO silently drops it so the follow-up Read finds nothing and
+				// the SDK raises "Provider produced inconsistent result after
+				// apply". Match either outcome.
+				ExpectError: regexp.MustCompile(`Resource Not Found|Provider produced inconsistent result after apply`),
+			},
+			{
+				PreConfig: func() { fmt.Println("Test: Create subnet") },
+				Config:    testAccMSOSchemaSiteAnpEpgSubnetConfigCreate(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet(subnetResource, "schema_id"),
+					resource.TestCheckResourceAttrSet(subnetResource, "site_id"),
+					resource.TestCheckResourceAttr(subnetResource, "template_name", msoSchemaTemplateName),
+					resource.TestCheckResourceAttr(subnetResource, "anp_name", msoSchemaTemplateAnpName),
+					resource.TestCheckResourceAttr(subnetResource, "epg_name", msoSchemaTemplateAnpEpgName),
+					resource.TestCheckResourceAttr(subnetResource, "ip", msoSchemaSiteAnpEpgSubnetIp),
+					resource.TestCheckResourceAttr(subnetResource, "scope", "private"),
+					resource.TestCheckResourceAttr(subnetResource, "shared", "false"),
+					resource.TestCheckResourceAttr(subnetResource, "no_default_gateway", "false"),
+					resource.TestCheckResourceAttr(subnetResource, "description", "test description"),
+					resource.TestCheckResourceAttrPair(
+						subnetResource, "site_id",
+						"data.mso_site."+msoTemplateSiteName1, "id",
+					),
+					resource.TestCheckResourceAttr(subnetResource, "id", msoSchemaSiteAnpEpgSubnetIp),
 				),
+			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Update subnet (attributes changed, description cleared)")
+				},
+				Config: testAccMSOSchemaSiteAnpEpgSubnetConfigUpdate(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(subnetResource, "ip", msoSchemaSiteAnpEpgSubnetIp),
+					resource.TestCheckResourceAttr(subnetResource, "scope", "public"),
+					resource.TestCheckResourceAttr(subnetResource, "shared", "true"),
+					resource.TestCheckResourceAttr(subnetResource, "no_default_gateway", "true"),
+					resource.TestCheckResourceAttr(subnetResource, "description", ""),
+				),
+			},
+			{
+				PreConfig:    func() { fmt.Println("Test: Import subnet") },
+				ResourceName: subnetResource,
+				ImportState:  true,
+				ImportStateIdFunc: func(s *terraform.State) (string, error) {
+					rs, ok := s.RootModule().Resources[subnetResource]
+					if !ok {
+						return "", fmt.Errorf("subnet resource not found in state: %s", subnetResource)
+					}
+					// The importer uses a "(.*)/ip/(.*)" regex to handle the
+					// "/" characters in the CIDR notation of the IP.
+					return fmt.Sprintf("%s/site/%s/template/%s/anp/%s/epg/%s/ip/%s",
+						rs.Primary.Attributes["schema_id"],
+						rs.Primary.Attributes["site_id"],
+						rs.Primary.Attributes["template_name"],
+						rs.Primary.Attributes["anp_name"],
+						rs.Primary.Attributes["epg_name"],
+						rs.Primary.Attributes["ip"],
+					), nil
+				},
+				ImportStateVerify: true,
 			},
 		},
 	})
 }
 
-func TestAccMSOSchemaSiteAnpEpgSubnet_Update(t *testing.T) {
-	var ss SchemaSiteAnpEpgSubnet
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckMSOSchemaSiteAnpEpgSubnetDestroy,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccCheckMSOSiteAnpEpgSubnetConfig_basic("private"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMSOSchemaSiteAnpEpgSubnetExists("mso_schema_site_anp_epg_subnet.subnet1", &ss),
-					testAccCheckMSOSchemaSiteAnpEpgSubnetAttributes("private", &ss),
-				),
-			},
-			{
-				Config: testAccCheckMSOSiteAnpEpgSubnetConfig_basic("public"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMSOSchemaSiteAnpEpgSubnetExists("mso_schema_site_anp_epg_subnet.subnet1", &ss),
-					testAccCheckMSOSchemaSiteAnpEpgSubnetAttributes("public", &ss),
-				),
-			},
-		},
-	})
+func testAccMSOSchemaSiteAnpEpgSubnetConfigCreate() string {
+	return fmt.Sprintf(`%[1]s
+	resource "mso_schema_site_anp_epg_subnet" "%[2]s" {
+		schema_id           = mso_schema.%[3]s.id
+		site_id             = mso_schema_site.%[4]s.site_id
+		template_name       = "%[5]s"
+		anp_name            = mso_schema_template_anp.%[6]s.name
+		epg_name            = mso_schema_site_anp_epg.%[2]s.epg_name
+		ip                  = "%[7]s"
+		scope               = "private"
+		shared              = false
+		no_default_gateway  = false
+		description         = "test description"
+	}`,
+		testAccMSOSchemaSiteAnpEpgStaticLeafPrerequisiteConfig(),
+		msoSchemaTemplateAnpEpgName,
+		msoSchemaName,
+		msoSchemaSiteResourceLabel1,
+		msoSchemaTemplateName,
+		msoSchemaTemplateAnpName,
+		msoSchemaSiteAnpEpgSubnetIp,
+	)
 }
 
-func testAccCheckMSOSiteAnpEpgSubnetConfig_basic(scope string) string {
-	return fmt.Sprintf(`
-   resource "mso_schema_site_anp_epg_subnet" "subnet1" {
-  schema_id = "5c4d5bb72700000401f80948"
-  site_id = "5c7c95b25100008f01c1ee3c"
-  template_name = "Template1"
-  anp_name = "ANP"
-  epg_name = "DB"
-  ip = "10.8.0.1/8"
-  description = "SubnetEntry"
-  scope = "%s"
-  shared = true
-  
-}
-`, scope)
+func testAccMSOSchemaSiteAnpEpgSubnetConfigUpdate() string {
+	return fmt.Sprintf(`%[1]s
+	resource "mso_schema_site_anp_epg_subnet" "%[2]s" {
+		schema_id           = mso_schema.%[3]s.id
+		site_id             = mso_schema_site.%[4]s.site_id
+		template_name       = "%[5]s"
+		anp_name            = mso_schema_template_anp.%[6]s.name
+		epg_name            = mso_schema_site_anp_epg.%[2]s.epg_name
+		ip                  = "%[7]s"
+		scope               = "public"
+		shared              = true
+		no_default_gateway  = true
+		description         = ""
+	}`,
+		testAccMSOSchemaSiteAnpEpgStaticLeafPrerequisiteConfig(),
+		msoSchemaTemplateAnpEpgName,
+		msoSchemaName,
+		msoSchemaSiteResourceLabel1,
+		msoSchemaTemplateName,
+		msoSchemaTemplateAnpName,
+		msoSchemaSiteAnpEpgSubnetIp,
+	)
 }
 
-func testAccCheckMSOSchemaSiteAnpEpgSubnetExists(subnetName string, ss *SchemaSiteAnpEpgSubnet) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*client.Client)
-		rs1, err1 := s.RootModule().Resources[subnetName]
+// testAccMSOSchemaSiteAnpEpgSubnetConfigNoSiteAssociation creates a subnet
+// without a prior mso_schema_site association, exercising the negative path.
+func testAccMSOSchemaSiteAnpEpgSubnetConfigNoSiteAssociation() string {
+	return fmt.Sprintf(`%[1]s
+	resource "mso_schema_site_anp_epg_subnet" "%[2]s" {
+		schema_id     = mso_schema.%[3]s.id
+		site_id       = data.mso_site.%[4]s.id
+		template_name = "%[5]s"
+		anp_name      = mso_schema_template_anp.%[6]s.name
+		epg_name      = mso_schema_template_anp_epg.%[2]s.name
+		ip            = "%[7]s"
+	}`,
+		fmt.Sprintf(`%s%s%s%s`,
+			testSchemaWithBothSitesPrerequisiteConfig(),
+			testSchemaTemplateVrfConfig(),
+			testSchemaTemplateBdConfig(),
+			testSchemaTemplateAnpConfig(),
+		)+testAccMSOSchemaSiteAnpEpgTemplateAnpEpgWithBdConfig(),
+		msoSchemaTemplateAnpEpgName,
+		msoSchemaName,
+		msoTemplateSiteName1,
+		msoSchemaTemplateName,
+		msoSchemaTemplateAnpName,
+		msoSchemaSiteAnpEpgSubnetIp,
+	)
+}
 
-		if !err1 {
-			return fmt.Errorf("Entry %s not found", subnetName)
+// testAccCheckMSOSchemaSiteAnpEpgSubnetDestroy walks state for any
+// mso_schema_site_anp_epg_subnet resources, fetches the schema, and asserts
+// that no sites[].anps[].epgs[].subnets[] entry with the matching IP remains.
+// A missing schema or missing sites array is treated as a successful destroy.
+func testAccCheckMSOSchemaSiteAnpEpgSubnetDestroy(s *terraform.State) error {
+	msoClient := testAccProvider.Meta().(*client.Client)
+
+	for _, rs := range s.RootModule().Resources {
+		if rs.Type != "mso_schema_site_anp_epg_subnet" {
+			continue
 		}
-		if rs1.Primary.ID == "" {
-			return fmt.Errorf("No Schema id was set")
-		}
+		schemaId := rs.Primary.Attributes["schema_id"]
+		stateSiteId := rs.Primary.Attributes["site_id"]
+		stateTemplate := rs.Primary.Attributes["template_name"]
+		stateAnp := rs.Primary.Attributes["anp_name"]
+		stateEpg := rs.Primary.Attributes["epg_name"]
+		stateIp := rs.Primary.Attributes["ip"]
 
-		cont, err := client.GetViaURL("api/v1/schemas/5c4d5bb72700000401f80948")
+		cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 		if err != nil {
-			return err
+			return nil
 		}
-
 		count, err := cont.ArrayCount("sites")
 		if err != nil {
-			return fmt.Errorf("No Site found")
+			return nil
 		}
-		tp := SchemaSiteAnpEpgSubnet{}
-		found := false
 		for i := 0; i < count; i++ {
-			tempCont, err := cont.ArrayElement(i, "sites")
+			siteCont, err := cont.ArrayElement(i, "sites")
 			if err != nil {
 				return err
 			}
-
-			apisiteId := models.StripQuotes(tempCont.S("siteId").String())
-			apiTemplateName := models.StripQuotes(tempCont.S("templateName").String())
-			if apiTemplateName == "Template1" && apisiteId == "5c7c95b25100008f01c1ee3c" {
-				anpCount, err := tempCont.ArrayCount("anps")
-				if err != nil {
-					return fmt.Errorf("Unable to get ANP list")
-				}
-				for j := 0; j < anpCount; j++ {
-					anpCont, err := tempCont.ArrayElement(j, "anps")
-					if err != nil {
-						return err
-					}
-					anpRef := models.StripQuotes(anpCont.S("anpRef").String())
-					re := regexp.MustCompile("/schemas/(.*)/templates/(.*)/anps/(.*)")
-					match := re.FindStringSubmatch(anpRef)
-					if match[3] == "ANP" {
-						epgCount, err := anpCont.ArrayCount("epgs")
-						if err != nil {
-							return fmt.Errorf("Unable to get EPG list")
-						}
-						for k := 0; k < epgCount; k++ {
-							epgCont, err := anpCont.ArrayElement(k, "epgs")
-							if err != nil {
-								return err
-							}
-							apiEpgRef := models.StripQuotes(epgCont.S("epgRef").String())
-							re := regexp.MustCompile("/schemas/(.*)/templates/(.*)/epgs/(.*)")
-							match := re.FindStringSubmatch(apiEpgRef)
-							apiEPG := match[3]
-							if apiEPG == "DB" {
-								subnetCount, err := epgCont.ArrayCount("subnets")
-								if err != nil {
-									return fmt.Errorf("Unable to get Static subnet list")
-								}
-								for l := 0; l < subnetCount; l++ {
-									subnetCont, err := epgCont.ArrayElement(l, "subnets")
-									if err != nil {
-										return err
-									}
-									subnetip := "10.8.0.1/8"
-									apisubnetip := models.StripQuotes(subnetCont.S("ip").String())
-									if subnetip == apisubnetip {
-										if subnetCont.Exists("description") {
-											tp.description = models.StripQuotes(subnetCont.S("description").String())
-										}
-										if subnetCont.Exists("scope") {
-											tp.scope = models.StripQuotes(subnetCont.S("scope").String())
-										}
-										if subnetCont.Exists("shared") {
-											tp.shared = (subnetCont.S("shared").Data().(bool))
-										}
-										found = true
-										break
-									}
-								}
-							}
-						}
-
-					}
-				}
+			if models.StripQuotes(siteCont.S("siteId").String()) != stateSiteId {
+				continue
 			}
-		}
-
-		if !found {
-			return fmt.Errorf("Subnet Entry not found from API")
-		}
-
-		tp1 := &tp
-
-		*ss = *tp1
-		return nil
-	}
-}
-
-func testAccCheckMSOSchemaSiteAnpEpgSubnetDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*client.Client)
-
-	for _, rs := range s.RootModule().Resources {
-
-		if rs.Type == "mso_schema_site_anp_epg_subnet" {
-			cont, err := client.GetViaURL("api/v1/schemas/5c4d5bb72700000401f80948")
+			if models.StripQuotes(siteCont.S("templateName").String()) != stateTemplate {
+				continue
+			}
+			anpCount, err := siteCont.ArrayCount("anps")
 			if err != nil {
-				return nil
-			} else {
-				count, err := cont.ArrayCount("sites")
+				continue
+			}
+			for j := 0; j < anpCount; j++ {
+				anpCont, err := siteCont.ArrayElement(j, "anps")
 				if err != nil {
-					return fmt.Errorf("No Site found")
+					return err
 				}
-
-				for i := 0; i < count; i++ {
-					tempCont, err := cont.ArrayElement(i, "sites")
+				anpRef := models.StripQuotes(anpCont.S("anpRef").String())
+				anpSplit := strings.Split(anpRef, "/")
+				if len(anpSplit) < 7 || anpSplit[6] != stateAnp {
+					continue
+				}
+				epgCount, err := anpCont.ArrayCount("epgs")
+				if err != nil {
+					continue
+				}
+				for k := 0; k < epgCount; k++ {
+					epgCont, err := anpCont.ArrayElement(k, "epgs")
 					if err != nil {
 						return err
 					}
-					apisiteId := models.StripQuotes(tempCont.S("siteId").String())
-					apiTemplateName := models.StripQuotes(tempCont.S("templateName").String())
-					if apiTemplateName == "Template1" && apisiteId == "5c7c95b25100008f01c1ee3c" {
-						anpCount, err := tempCont.ArrayCount("anps")
+					epgRef := models.StripQuotes(epgCont.S("epgRef").String())
+					epgSplit := strings.Split(epgRef, "/")
+					if len(epgSplit) < 9 || epgSplit[8] != stateEpg {
+						continue
+					}
+					subnetCount, err := epgCont.ArrayCount("subnets")
+					if err != nil {
+						continue
+					}
+					for l := 0; l < subnetCount; l++ {
+						subnetCont, err := epgCont.ArrayElement(l, "subnets")
 						if err != nil {
-							return fmt.Errorf("Unable to get ANP list")
+							return err
 						}
-						for j := 0; j < anpCount; j++ {
-							anpCont, err := tempCont.ArrayElement(j, "anps")
-							if err != nil {
-								return err
-							}
-							anpRef := models.StripQuotes(anpCont.S("anpRef").String())
-							re := regexp.MustCompile("/schemas/(.*)/templates/(.*)/anps/(.*)")
-							match := re.FindStringSubmatch(anpRef)
-							if match[3] == "ANP" {
-								epgCount, err := anpCont.ArrayCount("epgs")
-								if err != nil {
-									return fmt.Errorf("Unable to get EPG list")
-								}
-								for k := 0; k < epgCount; k++ {
-									epgCont, err := anpCont.ArrayElement(k, "epgs")
-									if err != nil {
-										return err
-									}
-									apiEpgRef := models.StripQuotes(epgCont.S("epgRef").String())
-									re := regexp.MustCompile("/schemas/(.*)/templates/(.*)/epgs/(.*)")
-									match := re.FindStringSubmatch(apiEpgRef)
-									apiEPG := match[3]
-									if apiEPG == "DB" {
-										subnetCount, err := epgCont.ArrayCount("subnets")
-										if err != nil {
-											return fmt.Errorf("Unable to get Static subnet list")
-										}
-										for l := 0; l < subnetCount; l++ {
-											subnetCont, err := epgCont.ArrayElement(l, "subnets")
-											if err != nil {
-												return err
-											}
-											subnetip := "10.8.0.1/8"
-											apisubnetip := models.StripQuotes(subnetCont.S("ip").String())
-											if subnetip == apisubnetip {
-												return fmt.Errorf("The Subnet entry still exists")
-											}
-										}
-									}
-								}
-							}
+						if models.StripQuotes(subnetCont.S("ip").String()) == stateIp {
+							return fmt.Errorf(
+								"mso_schema_site_anp_epg_subnet (site=%s, template=%s, anp=%s, epg=%s, ip=%s) still exists on schema %s",
+								stateSiteId, stateTemplate, stateAnp, stateEpg, stateIp, schemaId,
+							)
 						}
 					}
 				}
@@ -250,23 +269,4 @@ func testAccCheckMSOSchemaSiteAnpEpgSubnetDestroy(s *terraform.State) error {
 		}
 	}
 	return nil
-}
-
-func testAccCheckMSOSchemaSiteAnpEpgSubnetAttributes(scope string, ss *SchemaSiteAnpEpgSubnet) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		if "SubnetEntry" != ss.description {
-			return fmt.Errorf("Bad Subnet Description value %s", ss.description)
-		}
-
-		if true != ss.shared {
-			return fmt.Errorf("Bad Subnet Shared value %v", ss.shared)
-		}
-		return nil
-	}
-}
-
-type SchemaSiteAnpEpgSubnet struct {
-	description string
-	scope       string
-	shared      bool
 }

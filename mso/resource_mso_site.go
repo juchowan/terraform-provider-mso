@@ -10,8 +10,8 @@ import (
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func resourceMSOSite() *schema.Resource {
@@ -62,22 +62,8 @@ func resourceMSOSite() *schema.Resource {
 			"location": &schema.Schema{
 				Type:     schema.TypeMap,
 				Optional: true,
-				// Computed: true -> Removed, as it creates discrepancy for idempotency.
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-
-						"lat": &schema.Schema{
-							Type:     schema.TypeFloat,
-							Optional: true,
-							Computed: true,
-						},
-						"long": &schema.Schema{
-							Type:     schema.TypeFloat,
-							Optional: true,
-							Computed: true,
-						},
-					},
-				},
+				// SDKv2 does not support Elem with schema.Resource on TypeMap fields.
+				// Expected keys: "lat" (float), "long" (float). Validation skipped - resource is deprecated.
 			},
 
 			"urls": &schema.Schema{
@@ -113,6 +99,7 @@ func resourceMSOSite() *schema.Resource {
 				Computed: true,
 			},
 		}),
+		DeprecationMessage: nd4DeprecationMessage("mso_site"),
 	}
 }
 

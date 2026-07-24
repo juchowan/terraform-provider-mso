@@ -3,7 +3,7 @@ package mso
 import (
 	"log"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 func dataSourceMSOSystemConfig() *schema.Resource {
@@ -40,20 +40,11 @@ func dataSourceMSOSystemConfig() *schema.Resource {
 			"change_control": {
 				Type:     schema.TypeMap,
 				Computed: true,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"workflow": &schema.Schema{
-							Type:     schema.TypeString,
-							Computed: true,
-						},
-						"number_of_approvers": &schema.Schema{
-							Type:     schema.TypeInt,
-							Computed: true,
-						},
-					},
-				},
+				// SDKv2 does not support Elem with schema.Resource on TypeMap fields.
+				// Expected keys: "workflow" (string: "enabled"/"disabled"), "number_of_approvers" (integer ≥ 1). Validation skipped - resource is deprecated.
 			},
 		}),
+		DeprecationMessage: nd4DeprecationMessage("mso_system_config"),
 	}
 }
 

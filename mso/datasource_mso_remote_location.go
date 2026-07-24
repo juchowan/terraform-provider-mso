@@ -6,8 +6,8 @@ import (
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/container"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func datasourceMSORemoteLocation() *schema.Resource {
@@ -49,6 +49,7 @@ func datasourceMSORemoteLocation() *schema.Resource {
 				Computed: true,
 			},
 		}),
+		DeprecationMessage: nd4DeprecationMessage("mso_remote_location"),
 	}
 }
 

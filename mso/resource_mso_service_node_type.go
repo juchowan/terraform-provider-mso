@@ -6,8 +6,8 @@ import (
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func resourceMSOServiceNodeType() *schema.Resource {
@@ -21,6 +21,8 @@ func resourceMSOServiceNodeType() *schema.Resource {
 		},
 
 		SchemaVersion: version,
+
+		DeprecationMessage: "mso_service_node_type is deprecated and will be removed in the next major release.",
 
 		Schema: (map[string]*schema.Schema{
 			"name": &schema.Schema{
@@ -99,13 +101,10 @@ func resourceMSOServiceNodeTypeCreate(d *schema.ResourceData, m interface{}) err
 	}
 
 	nodeType := models.NewServiceNodeType(typeAttr)
-	d.Partial(true)
 	cont, err := msoClient.Save("api/v1/schemas/service-node-types", nodeType)
-
 	if err != nil {
 		return err
 	}
-	d.Partial(false)
 	d.SetId(models.StripQuotes(cont.S("id").String()))
 	log.Printf("[DEBUG] Creation finished successfully %s", d.Id())
 	return resourceMSOServiceNodeTypeRead(d, m)

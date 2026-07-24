@@ -3,12 +3,10 @@ package mso
 import (
 	"fmt"
 	"log"
-	"regexp"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
-	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func dataSourceMSOTemplateAnpEpgContract() *schema.Resource {
@@ -56,8 +54,12 @@ func dataSourceMSOTemplateAnpEpgContract() *schema.Resource {
 				ValidateFunc: validation.StringLenBetween(1, 1000),
 			},
 			"relationship_type": &schema.Schema{
-				Type:     schema.TypeString,
-				Computed: true,
+				Type: schema.TypeString,
+				// Computed: true,
+				// Changed to required because relationship_type is an identifier value
+				// A contract could be added with the same reference but different relationship_type
+				Required:     true,
+				ValidateFunc: validation.StringLenBetween(1, 1000),
 			},
 		}),
 	}
@@ -75,14 +77,11 @@ func dataSourceMSOTemplateAnpEpgContractRead(d *schema.ResourceData, m interface
 	if err != nil {
 		return err
 	}
-	count, err := cont.ArrayCount("templates")
-	if err != nil {
-		return fmt.Errorf("No Template found")
-	}
+
 	template := d.Get("template_name").(string)
-	anp := d.Get("anp_name")
-	epg := d.Get("epg_name")
-	contract := d.Get("contract_name")
+	anp := d.Get("anp_name").(string)
+	epg := d.Get("epg_name").(string)
+	contract := d.Get("contract_name").(string)
 	contractSchemaId := d.Get("contract_schema_id").(string)
 	if contractSchemaId == "" {
 		contractSchemaId = schemaId
@@ -91,72 +90,23 @@ func dataSourceMSOTemplateAnpEpgContractRead(d *schema.ResourceData, m interface
 	if contractTemplateName == "" {
 		contractTemplateName = template
 	}
-	found := false
-	for i := 0; i < count && !found; i++ {
-		tempCont, err := cont.ArrayElement(i, "templates")
-		if err != nil {
-			return err
-		}
-		currentTemplate := models.StripQuotes(tempCont.S("name").String())
+	relationshipType := d.Get("relationship_type").(string)
 
-		if currentTemplate == template {
-			anpCount, err := tempCont.ArrayCount("anps")
-			if err != nil {
-				return fmt.Errorf("Unable to get ANP list")
-			}
-			for j := 0; j < anpCount && !found; j++ {
-				anpCont, err := tempCont.ArrayElement(j, "anps")
-				if err != nil {
-					return err
-				}
-				currentAnp := models.StripQuotes(anpCont.S("name").String())
-				if currentAnp == anp {
-					epgCount, err := anpCont.ArrayCount("epgs")
-					if err != nil {
-						return fmt.Errorf("Unable to get EPG list")
-					}
-					for k := 0; k < epgCount && !found; k++ {
-						epgCont, err := anpCont.ArrayElement(k, "epgs")
-						if err != nil {
-							return err
-						}
-						currentEpg := models.StripQuotes(epgCont.S("name").String())
-						if currentEpg == epg {
-							crefCount, err := epgCont.ArrayCount("contractRelationships")
-							if err != nil {
-								return fmt.Errorf("Unable to get the contract relationships list")
-							}
-							for l := 0; l < crefCount; l++ {
-								crefCont, err := epgCont.ArrayElement(l, "contractRelationships")
-								if err != nil {
-									return err
-								}
-								contractRef := models.StripQuotes(crefCont.S("contractRef").String())
-								re := regexp.MustCompile("/schemas/(.*)/templates/(.*)/contracts/(.*)")
-								match := re.FindStringSubmatch(contractRef)
-								if match[3] == contract && match[1] == contractSchemaId && match[2] == contractTemplateName {
-									d.SetId(fmt.Sprintf("%s/templates/%s/anps/%s/epgs/%s/contracts/%s-%s-%s", schemaId, template, anp, epg, contractSchemaId, contractTemplateName, contract))
-									d.Set("contract_name", contract)
-									d.Set("contract_schema_id", contractSchemaId)
-									d.Set("contract_template_name", contractTemplateName)
-									d.Set("relationship_type", models.StripQuotes(crefCont.S("relationshipType").String()))
-									found = true
-									break
-								}
-							}
-
-						}
-
-					}
-				}
-			}
-		}
+	index, _, err := getSchemaTemplateEPGContract(cont, template, anp, epg, contract, contractSchemaId, contractTemplateName, relationshipType)
+	if err != nil {
+		return err
 	}
 
-	if !found {
+	if index == -1 {
 		d.SetId("")
 		return fmt.Errorf("Unable to find the ANP EPG Contract %s in Template %s of Schema Id %s ", contract, contractTemplateName, contractSchemaId)
 	}
+
+	d.SetId(fmt.Sprintf("%s/templates/%s/anps/%s/epgs/%s/contracts/%s-%s-%s", schemaId, template, anp, epg, contractSchemaId, contractTemplateName, contract))
+	d.Set("contract_name", contract)
+	d.Set("contract_schema_id", contractSchemaId)
+	d.Set("contract_template_name", contractTemplateName)
+	d.Set("relationship_type", relationshipType)
 
 	log.Printf("[DEBUG] %s: Read finished successfully", d.Id())
 	return nil

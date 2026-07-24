@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 )
 
 const msoTfTenantName = "tf_test_mso_tenant_app"
@@ -18,7 +18,7 @@ func TestAccNdoSchemaTemplateDeploy_Error(t *testing.T) {
 			{
 				PreConfig:   func() { fmt.Println("Test: Cross-template VRF/BD dependency (expecting deployment error)") },
 				Config:      testAccMsoSchemaTemplateErrorCrossTemplateVrfBdConfig(),
-				ExpectError: regexp.MustCompile(`^errors during apply: Error on deploy:`),
+				ExpectError: regexp.MustCompile(`Error on deploy:`),
 			},
 		},
 	})
@@ -201,12 +201,11 @@ func testAccSingleTenantConfig() string {
     %s
     resource "mso_tenant" "%s" {
         name = "%s"
-        display_name = "%s"
         site_associations { 
             site_id = data.mso_site.%s.id 
         }
     }
-    `, testSiteConfigAnsibleTest(), msoTfTenantName, msoTfTenantName, msoTfTenantName, msoTemplateSiteName1)
+    `, testSiteConfigAnsibleTest(), msoTfTenantName, msoTfTenantName, msoTemplateSiteName1)
 }
 
 func testAccMsoSchemaTemplateErrorCrossTemplateVrfBdConfig() string {

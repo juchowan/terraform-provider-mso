@@ -2,232 +2,275 @@ package mso
 
 import (
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
-func TestAccMSOSchemaSite_Basic(t *testing.T) {
-	var ss SchemaSiteTest
+// TestAccMSOSchemaSiteResource exercises the lifecycle of mso_schema_site:
+//   - add a single site to a schema template
+//   - add a second site to the same template
+//   - remove the second site while the template is NOT deployed
+//   - re-add the second site and deploy the template via mso_schema_template_deploy_ndo
+//   - attempt to remove the deployed site with undeploy_on_destroy=false and
+//     expect MSO to reject the destroy with a "must first be undeployed" error
+//   - flip undeploy_on_destroy=true and remove the second site while the
+//     template IS deployed (exercising the undeploy branch of
+//     resourceMSOSchemaSiteDelete)
+//   - import the remaining site
+//
+// The lab must have both `ansible_test` and `ansible_test_2` sites onboarded.
+func TestAccMSOSchemaSiteResource(t *testing.T) {
+	site1Resource := "mso_schema_site." + msoSchemaSiteResourceLabel1
+	site2Resource := "mso_schema_site." + msoSchemaSiteResourceLabel2
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckMSOSchemaSiteDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCheckMSOSchemaSiteConfig_basic(),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMSOSchemaSiteExists("mso_schema.schema1", "mso_schema_site.schemasite1", &ss),
-					testAccCheckMSOSchemaSiteAttributes(&ss),
+				PreConfig: func() { fmt.Println("Test: Add site_1 to schema template (not deployed)") },
+				Config:    testSchemaWithSingleSiteAssociationConfig(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet(site1Resource, "schema_id"),
+					resource.TestCheckResourceAttrSet(site1Resource, "site_id"),
+					resource.TestCheckResourceAttr(site1Resource, "template_name", msoSchemaTemplateName),
+					resource.TestCheckResourceAttr(site1Resource, "undeploy_on_destroy", "false"),
 				),
+			},
+			{
+				PreConfig: func() { fmt.Println("Test: Add site_2 to the same schema template (not deployed)") },
+				Config:    testAccMSOSchemaSiteConfigTwoSites(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet(site1Resource, "site_id"),
+					resource.TestCheckResourceAttr(site1Resource, "template_name", msoSchemaTemplateName),
+					resource.TestCheckResourceAttrSet(site2Resource, "site_id"),
+					resource.TestCheckResourceAttr(site2Resource, "template_name", msoSchemaTemplateName),
+					testAccCheckMSOSchemaSiteCount(site1Resource, 2),
+				),
+			},
+			{
+				PreConfig: func() { fmt.Println("Test: Remove site_2 while template is NOT deployed") },
+				Config:    testSchemaWithSingleSiteAssociationConfig(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet(site1Resource, "site_id"),
+					resource.TestCheckResourceAttr(site1Resource, "template_name", msoSchemaTemplateName),
+					testAccCheckMSOSchemaSiteCount(site1Resource, 1),
+					testAccCheckMSOSchemaSiteAbsent(site1Resource, msoTemplateSiteName2),
+				),
+			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Re-add site_2 with undeploy_on_destroy=false, add VRF and deploy template")
+				},
+				Config: testAccMSOSchemaSiteConfigTwoSitesDeployedSite2Undeploy(false),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet(site1Resource, "site_id"),
+					resource.TestCheckResourceAttrSet(site2Resource, "site_id"),
+					resource.TestCheckResourceAttr(site2Resource, "undeploy_on_destroy", "false"),
+					resource.TestCheckResourceAttrSet("mso_schema_template_deploy_ndo.deploy", "schema_id"),
+					testAccCheckMSOSchemaSiteCount(site1Resource, 2),
+				),
+			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Remove deployed site_2 with undeploy_on_destroy=false (expect error)")
+				},
+				Config:      testSchemaWithSingleSiteAssociationDeployedConfig(),
+				ExpectError: regexp.MustCompile(`cannot be deleted; template .* must first be undeployed`),
+			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Flip site_2 undeploy_on_destroy=true to allow undeploy on destroy")
+				},
+				Config: testAccMSOSchemaSiteConfigTwoSitesDeployedSite2Undeploy(true),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(site2Resource, "undeploy_on_destroy", "true"),
+					resource.TestCheckResourceAttrSet("mso_schema_template_deploy_ndo.deploy", "schema_id"),
+					testAccCheckMSOSchemaSiteCount(site1Resource, 2),
+				),
+			},
+			{
+				PreConfig: func() { fmt.Println("Test: Remove site_2 while template IS deployed (undeploy_on_destroy=true)") },
+				Config:    testSchemaWithSingleSiteAssociationDeployedConfig(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet(site1Resource, "site_id"),
+					resource.TestCheckResourceAttr(site1Resource, "undeploy_on_destroy", "true"),
+					resource.TestCheckResourceAttrSet("mso_schema_template_deploy_ndo.deploy", "schema_id"),
+					testAccCheckMSOSchemaSiteCount(site1Resource, 1),
+					testAccCheckMSOSchemaSiteAbsent(site1Resource, msoTemplateSiteName2),
+				),
+			},
+			{
+				PreConfig:    func() { fmt.Println("Test: Import remaining schema_site (site_1)") },
+				ResourceName: site1Resource,
+				ImportState:  true,
+				ImportStateIdFunc: func(s *terraform.State) (string, error) {
+					rs, ok := s.RootModule().Resources[site1Resource]
+					if !ok {
+						return "", fmt.Errorf("schema_site resource not found in state: %s", site1Resource)
+					}
+					return fmt.Sprintf("%s/sites/%s/templates/%s/undeploy_on_destroy/%s",
+						rs.Primary.Attributes["schema_id"],
+						msoTemplateSiteName1,
+						rs.Primary.Attributes["template_name"],
+						rs.Primary.Attributes["undeploy_on_destroy"],
+					), nil
+				},
+				ImportStateVerify: true,
 			},
 		},
 	})
 }
 
-func testAccCheckMSOSchemaSiteConfig_basic() string {
-	return fmt.Sprintf(`
-	resource "mso_schema" "schema1" {
-  name          = "shah2"
-  template_name = "temp3"
-  tenant_id     = "5e9d09482c000068500a269a"
-
+// testAccMSOSchemaSiteConfigTwoSites adds site_2 to the single-site config to
+// exercise adding a second site association to the same template (no deploy).
+func testAccMSOSchemaSiteConfigTwoSites() string {
+	return fmt.Sprintf(`%s%s`,
+		testSchemaWithSingleSiteAssociationConfig(),
+		testSchemaSiteConfig(msoSchemaSiteResourceLabel2, msoTemplateSiteName2, false),
+	)
 }
 
-resource "mso_schema_site" "schemasite1" {
-    schema_id = "${mso_schema.schema1.id}"
-    template_name = "temp3"
-    site_id = "5c7c95b25100008f01c1ee3c"
+// testAccMSOSchemaSiteConfigTwoSitesDeployedSite2Undeploy emits the deployed
+// two-site configuration where site_1 has `undeploy_on_destroy=true` and the
+// caller controls the value on site_2. This lets the lifecycle test exercise
+// both the rejected-destroy (false) and the undeploy-on-destroy (true) paths.
+func testAccMSOSchemaSiteConfigTwoSitesDeployedSite2Undeploy(site2UndeployOnDestroy bool) string {
+	return fmt.Sprintf(`%s%s%s%s%s`,
+		testSchemaWithBothSitesPrerequisiteConfig(),
+		testSchemaSiteConfig(msoSchemaSiteResourceLabel1, msoTemplateSiteName1, true),
+		testSchemaSiteConfig(msoSchemaSiteResourceLabel2, msoTemplateSiteName2, site2UndeployOnDestroy),
+		testSchemaTemplateVrfConfig(),
+		testSchemaTemplateDeployNdoConfig([]string{
+			"mso_schema_site." + msoSchemaSiteResourceLabel1,
+			"mso_schema_site." + msoSchemaSiteResourceLabel2,
+			"mso_schema_template_vrf." + msoSchemaTemplateVrfName,
+		}),
+	)
 }
-	
 
-	`)
-}
-
-func testAccCheckMSOSchemaSiteExists(schemaName string, schemaSiteName string, ss *SchemaSiteTest) resource.TestCheckFunc {
+// testAccCheckMSOSchemaSiteCount asserts the number of `sites` entries on the
+// schema referenced by the supplied resource name matches the expected count.
+func testAccCheckMSOSchemaSiteCount(resourceName string, expected int) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*client.Client)
-		rs1, err1 := s.RootModule().Resources[schemaName]
-		rs2, err2 := s.RootModule().Resources[schemaSiteName]
-
-		if !err1 {
-			return fmt.Errorf("Schema %s not found", schemaName)
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("resource not found in state: %s", resourceName)
 		}
-
-		if !err2 {
-			return fmt.Errorf("Schema site %s not found", schemaSiteName)
-		}
-		if rs1.Primary.ID == "" {
-			return fmt.Errorf("No Schema id was set")
-		}
-		if rs2.Primary.ID == "" {
-			return fmt.Errorf("No Schema Site id was set")
-		}
-
-		cont, err := client.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", rs1.Primary.ID))
+		schemaId := rs.Primary.Attributes["schema_id"]
+		msoClient := testAccProvider.Meta().(*client.Client)
+		cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to GET schema %s: %v", schemaId, err)
 		}
 		count, err := cont.ArrayCount("sites")
 		if err != nil {
-			return fmt.Errorf("No Template found")
+			if expected == 0 {
+				return nil
+			}
+			return fmt.Errorf("expected %d sites on schema %s but `sites` array missing: %v", expected, schemaId, err)
 		}
-		tp := SchemaSiteTest{}
+		if count != expected {
+			return fmt.Errorf("expected %d sites on schema %s, got %d", expected, schemaId, count)
+		}
+		return nil
+	}
+}
 
+// testAccCheckMSOSchemaSiteAbsent asserts that the schema does not contain a
+// site association whose `siteId` resolves to the supplied site name.
+func testAccCheckMSOSchemaSiteAbsent(resourceName, siteName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("resource not found in state: %s", resourceName)
+		}
+		schemaId := rs.Primary.Attributes["schema_id"]
+		msoClient := testAccProvider.Meta().(*client.Client)
+
+		// Resolve siteName -> siteId.
+		sitesCont, err := msoClient.GetViaURL("api/v1/sites")
+		if err != nil {
+			return fmt.Errorf("failed to GET sites: %v", err)
+		}
+		var targetSiteId string
+		sitesData, ok := sitesCont.S("sites").Data().([]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected payload for api/v1/sites")
+		}
+		for _, raw := range sitesData {
+			entry, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if name, _ := entry["name"].(string); name == siteName {
+				targetSiteId, _ = entry["id"].(string)
+				break
+			}
+		}
+		if targetSiteId == "" {
+			return fmt.Errorf("site %q not found on MSO", siteName)
+		}
+
+		schemaCont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+		if err != nil {
+			return fmt.Errorf("failed to GET schema %s: %v", schemaId, err)
+		}
+		count, err := schemaCont.ArrayCount("sites")
+		if err != nil {
+			return nil // no sites at all
+		}
 		for i := 0; i < count; i++ {
-			tempCont, err := cont.ArrayElement(i, "sites")
+			elem, err := schemaCont.ArrayElement(i, "sites")
 			if err != nil {
 				return err
 			}
-
-			apiSiteId := models.StripQuotes(tempCont.S("siteId").String())
-			apiTemplate := models.StripQuotes(tempCont.S("templateName").String())
-
-			tp.SchemaId = rs1.Primary.ID
-			tp.SiteId = apiSiteId
-			tp.TemplateName = apiTemplate
-
+			if models.StripQuotes(elem.S("siteId").String()) == targetSiteId {
+				return fmt.Errorf("expected site %q (id=%s) absent from schema %s but it is still present", siteName, targetSiteId, schemaId)
+			}
 		}
-		tp1 := &tp
-
-		*ss = *tp1
 		return nil
 	}
 }
 
 func testAccCheckMSOSchemaSiteDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*client.Client)
+	msoClient := testAccProvider.Meta().(*client.Client)
 
-	rs1, err1 := s.RootModule().Resources["mso_schema.schema1"]
-
-	if !err1 {
-		return fmt.Errorf("Schema %s not found", "mso_schema.schema1")
-	}
-
-	schemaid := rs1.Primary.ID
 	for _, rs := range s.RootModule().Resources {
+		if rs.Type != "mso_schema_site" {
+			continue
+		}
+		schemaId := rs.Primary.Attributes["schema_id"]
+		stateSiteId := rs.Primary.Attributes["site_id"]
+		stateTemplate := rs.Primary.Attributes["template_name"]
 
-		if rs.Type == "mso_schema_site" {
-			cont, err := client.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaid))
+		cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
+		if err != nil {
+			// Schema itself has also been destroyed, which implicitly removes
+			// any site associations.
+			return nil
+		}
+		count, err := cont.ArrayCount("sites")
+		if err != nil {
+			return nil
+		}
+		for i := 0; i < count; i++ {
+			elem, err := cont.ArrayElement(i, "sites")
 			if err != nil {
-				return nil
-			} else {
-				count, err := cont.ArrayCount("sites")
-				if err != nil {
-					return fmt.Errorf("No Template found")
-				}
-				for i := 0; i < count; i++ {
-					tempCont, err := cont.ArrayElement(i, "sites")
-					if err != nil {
-						return fmt.Errorf("No sites exists")
-					}
-					apiSiteId := models.StripQuotes(tempCont.S("siteId").String())
-
-					if rs.Primary.ID == apiSiteId {
-						return fmt.Errorf("Schema site record still exists")
-
-					}
-
-				}
+				return err
 			}
-		} else {
-
+			apiSiteId := models.StripQuotes(elem.S("siteId").String())
+			apiTemplate := models.StripQuotes(elem.S("templateName").String())
+			if apiSiteId == stateSiteId && apiTemplate == stateTemplate {
+				return fmt.Errorf("mso_schema_site (site=%s, template=%s) still exists on schema %s", stateSiteId, stateTemplate, schemaId)
+			}
 		}
 	}
 	return nil
-}
-func testAccCheckMSOSchemaSiteAttributes(ss *SchemaSiteTest) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		if "temp3" != ss.TemplateName {
-			return fmt.Errorf("Bad Template name %s", ss.TemplateName)
-		}
-		return nil
-	}
-}
-
-type SchemaSiteTest struct {
-	SchemaId     string `json:",omitempty"`
-	SiteId       string `json:",omitempty"`
-	TemplateName string `json:",omitempty"`
-}
-
-func TestAccMsoSchemaSite(t *testing.T) {
-	logFilePath := setupTestLogCapture(t, "TRACE")
-
-	expectedLogs := []string{
-		`\[DEBUG\].*undeploy`,
-		`\[TRACE\] Task status is \w+`,
-		`\[DEBUG\] Custom retry function indicated a retry is needed for 2xx response`,
-		`\[ERROR\] HTTP Request failed with status code 200, retrying\.\.\.`,
-		`\[DEBUG\] Begining backoff method: attempts \d+ on \d+`,
-	}
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:  func() { testAccPreCheck(t) },
-		Providers: testAccProviders,
-		Steps: []resource.TestStep{
-			{
-				PreConfig: func() { fmt.Println("Test: MSO Schema Site") },
-				Config:    testAccMsoSchemaSite(),
-				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("mso_schema_site.schema_site_1", "template_name", "Template1"),
-				),
-			},
-		},
-		CheckDestroy: customTestCheckLogs(logFilePath, expectedLogs),
-	})
-}
-
-func testAccMsoSchemaSite() string {
-	return fmt.Sprintf(`%s
-	resource "mso_schema" "schema_blocks" {
-		name = "demo_schema_blocks"
-		template {
-			name         = "Template1"
-			display_name = "TEMP1"
-			tenant_id    = mso_tenant.%s.id
-			template_type = "aci_multi_site"
-		}
-	}
-
-	resource "mso_schema_site" "schema_site_1" {
-		schema_id     = mso_schema.schema_blocks.id
-		site_id       = data.mso_site.%s.id
-		template_name = tolist(mso_schema.schema_blocks.template)[0].name
-		undeploy_on_destroy = true
-	}
-
-	resource "mso_schema_template_vrf" "vrf" {
-		count = 50
-		schema_id       = mso_schema.schema_blocks.id
-		template        = tolist(mso_schema.schema_blocks.template)[0].name
-		name            = "vrf${count.index + 1}"
-		display_name    = "VRF-${count.index + 1}"
-		layer3_multicast=true
-	  }
-
-	  resource "mso_schema_template_bd" "bridgedomain" {
-		  schema_id              = mso_schema.schema_blocks.id
-		  template_name          = tolist(mso_schema.schema_blocks.template)[0].name
-		  name                   = "bd"
-		  display_name           = "test"
-		  vrf_name               = mso_schema_template_vrf.vrf[0].name
-		  vrf_schema_id          = mso_schema.schema_blocks.id
-		  vrf_template_name      = tolist(mso_schema.schema_blocks.template)[0].name
-		  layer2_unknown_unicast = "proxy" 
-		  intersite_bum_traffic  = false
-		  optimize_wan_bandwidth = true
-		  layer2_stretch         = true
-		  layer3_multicast       = true  
-	}
-
-	resource "mso_schema_template_deploy_ndo" "deploy_ndo" {
-		force_apply = ""
-		schema_id     = mso_schema_template_bd.bridgedomain.schema_id
-		template_name = tolist(mso_schema.schema_blocks.template)[0].name
-	}
-	`, testAccSingleTenantConfig(), msoTfTenantName, msoTemplateSiteName1)
 }

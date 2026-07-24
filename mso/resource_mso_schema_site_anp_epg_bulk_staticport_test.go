@@ -3,35 +3,28 @@ package mso
 import (
 	"fmt"
 	"regexp"
-	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
-func TestAccMSOSchemaSiteAnpEpgBulkStaticPort_Basic(t *testing.T) {
-	var ss SchemaSiteAnpEpgBulkStaticPort
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckMSOSchemaSiteAnpEpgBulkStaticPortDestroy,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccCheckMSOSiteAnpEpgBulkStaticPortConfig_basic("untagged"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMSOSchemaSiteAnpEpgBulkStaticPortExists("mso_schema_site_anp_epg_static_port.static_port", &ss),
-					testAccCheckMSOSchemaSiteAnpEpgBulkStaticPortAttributes("untagged", &ss),
-				),
-			},
-		},
-	})
-}
-
-func TestAccMSOSchemaSiteAnpEpgBulkStaticPort_Update(t *testing.T) {
-	var ss SchemaSiteAnpEpgBulkStaticPort
+// TestAccMSOSchemaSiteAnpEpgBulkStaticPortResource exercises the full lifecycle
+// of mso_schema_site_anp_epg_bulk_staticport:
+//   - attempt to create without a mso_schema_site association (expect error)
+//   - create two static ports and verify all attributes via TypeSet helpers
+//   - update: modify one port's attributes and drop the second (verifies removal)
+//   - import the resource
+//
+// The test requires msoSchemaSiteAnpEpgStaticPortPod/Leaf/Path/Path2 to
+// correspond to real interfaces on a leaf switch onboarded to the ansible_test site.
+//
+// The lab must have the `ansible_test` and `ansible_test_2` sites onboarded.
+func TestAccMSOSchemaSiteAnpEpgBulkStaticPortResource(t *testing.T) {
+	bulkStaticPortResource := "mso_schema_site_anp_epg_bulk_staticport." + msoSchemaTemplateAnpEpgName
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
@@ -39,237 +32,315 @@ func TestAccMSOSchemaSiteAnpEpgBulkStaticPort_Update(t *testing.T) {
 		CheckDestroy: testAccCheckMSOSchemaSiteAnpEpgBulkStaticPortDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCheckMSOSiteAnpEpgBulkStaticPortConfig_basic("untagged"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMSOSchemaSiteAnpEpgBulkStaticPortExists("mso_schema_site_anp_epg_static_port.static_port", &ss),
-					testAccCheckMSOSchemaSiteAnpEpgBulkStaticPortAttributes("untagged", &ss),
+				PreConfig: func() {
+					fmt.Println("Test: Create bulk static port without mso_schema_site association (expect error)")
+				},
+				Config:      testAccMSOSchemaSiteAnpEpgBulkStaticPortConfigNoSiteAssociation(),
+				ExpectError: regexp.MustCompile(`Site-Template association for .* is not found\.`),
+			},
+			{
+				PreConfig: func() { fmt.Println("Test: Create bulk static port (two ports)") },
+				Config:    testAccMSOSchemaSiteAnpEpgBulkStaticPortConfigCreate(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet(bulkStaticPortResource, "schema_id"),
+					resource.TestCheckResourceAttrSet(bulkStaticPortResource, "site_id"),
+					resource.TestCheckResourceAttr(bulkStaticPortResource, "template_name", msoSchemaTemplateName),
+					resource.TestCheckResourceAttr(bulkStaticPortResource, "anp_name", msoSchemaTemplateAnpName),
+					resource.TestCheckResourceAttr(bulkStaticPortResource, "epg_name", msoSchemaTemplateAnpEpgName),
+					resource.TestCheckResourceAttr(bulkStaticPortResource, "static_ports.#", "2"),
+					CustomTestCheckTypeSetElemAttrs(bulkStaticPortResource, "static_ports", map[string]string{
+						"path_type":            "port",
+						"pod":                  msoSchemaSiteAnpEpgStaticPortPod,
+						"leaf":                 msoSchemaSiteAnpEpgStaticPortLeaf,
+						"path":                 msoSchemaSiteAnpEpgStaticPortPath,
+						"vlan":                 "200",
+						"deployment_immediacy": "lazy",
+						"mode":                 "regular",
+						"micro_seg_vlan":       "300",
+					}),
+					CustomTestCheckTypeSetElemAttrs(bulkStaticPortResource, "static_ports", map[string]string{
+						"path_type":            "port",
+						"pod":                  msoSchemaSiteAnpEpgStaticPortPod,
+						"leaf":                 msoSchemaSiteAnpEpgStaticPortLeaf,
+						"path":                 msoSchemaSiteAnpEpgStaticPortPath2,
+						"vlan":                 "201",
+						"deployment_immediacy": "immediate",
+						"mode":                 "untagged",
+						"fex":                  msoSchemaSiteAnpEpgStaticPortFex,
+					}),
+					resource.TestCheckResourceAttrPair(
+						bulkStaticPortResource, "site_id",
+						"data.mso_site."+msoTemplateSiteName1, "id",
+					),
 				),
 			},
 			{
-				Config: testAccCheckMSOSiteAnpEpgBulkStaticPortConfig_basic("regular"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMSOSchemaSiteAnpEpgBulkStaticPortExists("mso_schema_site_anp_epg_static_port.static_port", &ss),
-					testAccCheckMSOSchemaSiteAnpEpgBulkStaticPortAttributes("regular", &ss),
+				PreConfig:    func() { fmt.Println("Test: Import bulk static port (two ports)") },
+				ResourceName: bulkStaticPortResource,
+				ImportState:  true,
+				ImportStateIdFunc: func(s *terraform.State) (string, error) {
+					rs, ok := s.RootModule().Resources[bulkStaticPortResource]
+					if !ok {
+						return "", fmt.Errorf("bulk static port resource not found in state: %s", bulkStaticPortResource)
+					}
+					// Import ID format (used by resourceMSOSchemaSiteAnpEpgBulkStaticPortImport):
+					// {schemaId}/site/{siteId}/template/{templateName}/anp/{anpName}/epg/{epgName}
+					return fmt.Sprintf("%s/site/%s/template/%s/anp/%s/epg/%s",
+						rs.Primary.Attributes["schema_id"],
+						rs.Primary.Attributes["site_id"],
+						rs.Primary.Attributes["template_name"],
+						rs.Primary.Attributes["anp_name"],
+						rs.Primary.Attributes["epg_name"],
+					), nil
+				},
+				ImportStateVerify: true,
+			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Update bulk static port (one port, changed vlan/mode/immediacy)")
+				},
+				Config: testAccMSOSchemaSiteAnpEpgBulkStaticPortConfigUpdate(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(bulkStaticPortResource, "static_ports.#", "1"),
+					CustomTestCheckTypeSetElemAttrs(bulkStaticPortResource, "static_ports", map[string]string{
+						"path_type":            "port",
+						"pod":                  msoSchemaSiteAnpEpgStaticPortPod,
+						"leaf":                 msoSchemaSiteAnpEpgStaticPortLeaf,
+						"path":                 msoSchemaSiteAnpEpgStaticPortPath,
+						"vlan":                 "202",
+						"deployment_immediacy": "immediate",
+						"mode":                 "native",
+					}),
+				),
+			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Update bulk static port (remove all ports)")
+				},
+				Config: testAccMSOSchemaSiteAnpEpgBulkStaticPortConfigEmpty(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(bulkStaticPortResource, "static_ports.#", "0"),
 				),
 			},
 		},
 	})
 }
 
-func testAccCheckMSOSiteAnpEpgBulkStaticPortConfig_basic(mode string) string {
-	return fmt.Sprintf(`
-   resource "mso_schema_site_anp_epg_static_port" "static_port" {
-   schema_id = "5c4d5bb72700000401f80948"
-   site_id = "5c7c95b25100008f01c1ee3c"
-   template_name = "Template1"
-   anp_name = "ANP"
-   epg_name = "DB"
-   path_type = "port"
-   deployment_immediacy = "lazy"
-   pod = "pod-9"
-   leaf = "112"
-   path = "eth1/10"
-   vlan = 50
-   mode = "%s"
+func testAccMSOSchemaSiteAnpEpgBulkStaticPortConfigCreate() string {
+	return fmt.Sprintf(`%[1]s
+	resource "mso_schema_site_anp_epg_bulk_staticport" "%[2]s" {
+		schema_id     = mso_schema.%[3]s.id
+		site_id       = mso_schema_site.%[4]s.site_id
+		template_name = "%[5]s"
+		anp_name      = mso_schema_template_anp.%[6]s.name
+		epg_name      = mso_schema_site_anp_epg.%[2]s.epg_name
 
-  
-}
-
-`, mode)
-}
-
-func testAccCheckMSOSchemaSiteAnpEpgBulkStaticPortExists(portName string, ss *SchemaSiteAnpEpgBulkStaticPort) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*client.Client)
-		rs1, err1 := s.RootModule().Resources[portName]
-
-		if !err1 {
-			return fmt.Errorf("Entry %s not found", portName)
-		}
-		if rs1.Primary.ID == "" {
-			return fmt.Errorf("No Schema id was set")
+		static_ports {
+			path_type            = "port"
+			pod                  = "%[7]s"
+			leaf                 = "%[8]s"
+			path                 = "%[9]s"
+			vlan                 = 200
+			deployment_immediacy = "lazy"
+			mode                 = "regular"
+			micro_seg_vlan       = 300
 		}
 
-		cont, err := client.GetViaURL("api/v1/schemas/5c4d5bb72700000401f80948")
+		static_ports {
+			path_type            = "port"
+			pod                  = "%[7]s"
+			leaf                 = "%[8]s"
+			path                 = "%[10]s"
+			vlan                 = 201
+			deployment_immediacy = "immediate"
+			mode                 = "untagged"
+			fex                  = "%[11]s"
+		}
+	}`,
+		testAccMSOSchemaSiteAnpEpgStaticLeafPrerequisiteConfig(),
+		msoSchemaTemplateAnpEpgName,
+		msoSchemaName,
+		msoSchemaSiteResourceLabel1,
+		msoSchemaTemplateName,
+		msoSchemaTemplateAnpName,
+		msoSchemaSiteAnpEpgStaticPortPod,
+		msoSchemaSiteAnpEpgStaticPortLeaf,
+		msoSchemaSiteAnpEpgStaticPortPath,
+		msoSchemaSiteAnpEpgStaticPortPath2,
+		msoSchemaSiteAnpEpgStaticPortFex,
+	)
+}
+
+func testAccMSOSchemaSiteAnpEpgBulkStaticPortConfigUpdate() string {
+	return fmt.Sprintf(`%[1]s
+	resource "mso_schema_site_anp_epg_bulk_staticport" "%[2]s" {
+		schema_id     = mso_schema.%[3]s.id
+		site_id       = mso_schema_site.%[4]s.site_id
+		template_name = "%[5]s"
+		anp_name      = mso_schema_template_anp.%[6]s.name
+		epg_name      = mso_schema_site_anp_epg.%[2]s.epg_name
+
+		static_ports {
+			path_type            = "port"
+			pod                  = "%[7]s"
+			leaf                 = "%[8]s"
+			path                 = "%[9]s"
+			vlan                 = 202
+			deployment_immediacy = "immediate"
+			mode                 = "native"
+		}
+	}`,
+		testAccMSOSchemaSiteAnpEpgStaticLeafPrerequisiteConfig(),
+		msoSchemaTemplateAnpEpgName,
+		msoSchemaName,
+		msoSchemaSiteResourceLabel1,
+		msoSchemaTemplateName,
+		msoSchemaTemplateAnpName,
+		msoSchemaSiteAnpEpgStaticPortPod,
+		msoSchemaSiteAnpEpgStaticPortLeaf,
+		msoSchemaSiteAnpEpgStaticPortPath,
+	)
+}
+
+func testAccMSOSchemaSiteAnpEpgBulkStaticPortConfigEmpty() string {
+	return fmt.Sprintf(`%[1]s
+	resource "mso_schema_site_anp_epg_bulk_staticport" "%[2]s" {
+		schema_id     = mso_schema.%[3]s.id
+		site_id       = mso_schema_site.%[4]s.site_id
+		template_name = "%[5]s"
+		anp_name      = mso_schema_template_anp.%[6]s.name
+		epg_name      = mso_schema_site_anp_epg.%[2]s.epg_name
+	}`,
+		testAccMSOSchemaSiteAnpEpgStaticLeafPrerequisiteConfig(),
+		msoSchemaTemplateAnpEpgName,
+		msoSchemaName,
+		msoSchemaSiteResourceLabel1,
+		msoSchemaTemplateName,
+		msoSchemaTemplateAnpName,
+	)
+}
+
+// testAccMSOSchemaSiteAnpEpgBulkStaticPortConfigNoSiteAssociation creates a
+// bulk static port without a prior mso_schema_site association. Because
+// resourceMSOSchemaSiteAnpEpgBulkStaticPortCreate calls
+// getSiteFromSiteIdAndTemplate before any PATCH, NDO returns
+// "Site-Template association for X-Y is not found." immediately.
+func testAccMSOSchemaSiteAnpEpgBulkStaticPortConfigNoSiteAssociation() string {
+	return fmt.Sprintf(`%[1]s
+	resource "mso_schema_site_anp_epg_bulk_staticport" "%[2]s" {
+		schema_id     = mso_schema.%[3]s.id
+		site_id       = data.mso_site.%[4]s.id
+		template_name = "%[5]s"
+		anp_name      = mso_schema_template_anp.%[6]s.name
+		epg_name      = mso_schema_template_anp_epg.%[2]s.name
+
+		static_ports {
+			path_type            = "port"
+			pod                  = "%[7]s"
+			leaf                 = "%[8]s"
+			path                 = "%[9]s"
+			vlan                 = 200
+			deployment_immediacy = "lazy"
+			mode                 = "regular"
+			micro_seg_vlan       = 300
+		}
+	}`,
+		fmt.Sprintf(`%s%s%s%s`,
+			testSchemaWithBothSitesPrerequisiteConfig(),
+			testSchemaTemplateVrfConfig(),
+			testSchemaTemplateBdConfig(),
+			testSchemaTemplateAnpConfig(),
+		)+testAccMSOSchemaSiteAnpEpgTemplateAnpEpgWithBdConfig(),
+		msoSchemaTemplateAnpEpgName,
+		msoSchemaName,
+		msoTemplateSiteName1,
+		msoSchemaTemplateName,
+		msoSchemaTemplateAnpName,
+		msoSchemaSiteAnpEpgStaticPortPod,
+		msoSchemaSiteAnpEpgStaticPortLeaf,
+		msoSchemaSiteAnpEpgStaticPortPath,
+	)
+}
+
+// testAccCheckMSOSchemaSiteAnpEpgBulkStaticPortDestroy walks state for any
+// mso_schema_site_anp_epg_bulk_staticport resources, fetches the schema, and
+// asserts that the EPG's staticPorts[] array is empty. A missing schema or
+// missing sites array is treated as a successful destroy.
+func testAccCheckMSOSchemaSiteAnpEpgBulkStaticPortDestroy(s *terraform.State) error {
+	msoClient := testAccProvider.Meta().(*client.Client)
+
+	for _, rs := range s.RootModule().Resources {
+		if rs.Type != "mso_schema_site_anp_epg_bulk_staticport" {
+			continue
+		}
+		schemaId := rs.Primary.Attributes["schema_id"]
+		stateSiteId := rs.Primary.Attributes["site_id"]
+		stateTemplate := rs.Primary.Attributes["template_name"]
+		stateAnp := rs.Primary.Attributes["anp_name"]
+		stateEpg := rs.Primary.Attributes["epg_name"]
+
+		cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", schemaId))
 		if err != nil {
-			return err
+			// Schema itself has been destroyed.
+			return nil
 		}
-
 		count, err := cont.ArrayCount("sites")
 		if err != nil {
-			return fmt.Errorf("No Site found")
+			return nil
 		}
-		tp := SchemaSiteAnpEpgBulkStaticPort{}
-		found := false
 		for i := 0; i < count; i++ {
-			tempCont, err := cont.ArrayElement(i, "sites")
+			siteCont, err := cont.ArrayElement(i, "sites")
 			if err != nil {
 				return err
 			}
-
-			apisiteId := models.StripQuotes(tempCont.S("siteId").String())
-			apiTemplateName := models.StripQuotes(tempCont.S("templateName").String())
-			if apiTemplateName == "Template1" && apisiteId == "5c7c95b25100008f01c1ee3c" {
-				anpCount, err := tempCont.ArrayCount("anps")
-				if err != nil {
-					return fmt.Errorf("Unable to get ANP list")
-				}
-				for j := 0; j < anpCount; j++ {
-					anpCont, err := tempCont.ArrayElement(j, "anps")
-					if err != nil {
-						return err
-					}
-					anpRef := models.StripQuotes(anpCont.S("anpRef").String())
-					re := regexp.MustCompile("/schemas/(.*)/templates/(.*)/anps/(.*)")
-					match := re.FindStringSubmatch(anpRef)
-					if match[3] == "ANP" {
-						epgCount, err := anpCont.ArrayCount("epgs")
-						if err != nil {
-							return fmt.Errorf("Unable to get EPG list")
-						}
-						for k := 0; k < epgCount; k++ {
-							epgCont, err := anpCont.ArrayElement(k, "epgs")
-							if err != nil {
-								return err
-							}
-							apiEpgRef := models.StripQuotes(epgCont.S("epgRef").String())
-							re := regexp.MustCompile("/schemas/(.*)/templates/(.*)/epgs/(.*)")
-							match := re.FindStringSubmatch(apiEpgRef)
-							apiEPG := match[3]
-							if apiEPG == "DB" {
-								portCount, err := epgCont.ArrayCount("staticPorts")
-								if err != nil {
-									return fmt.Errorf("Unable to get Static Port list")
-								}
-								for l := 0; l < portCount; l++ {
-									portCont, err := epgCont.ArrayElement(l, "staticPorts")
-									if err != nil {
-										return err
-									}
-									portpath := fmt.Sprintf("topology/pod-9/paths-112/pathep-[eth1/10]")
-									apiportpath := models.StripQuotes(portCont.S("path").String())
-									if portpath == apiportpath {
-										if portCont.Exists("portEncapVlan") {
-											tempvar, _ := strconv.Atoi(fmt.Sprintf("%v", portCont.S("portEncapVlan")))
-											tp.portencapvlan = tempvar
-										}
-										tp.deploymentimmediacy = models.StripQuotes(portCont.S("deploymentImmediacy").String())
-										tp.mode = models.StripQuotes(portCont.S("mode").String())
-										found = true
-										break
-									}
-								}
-							}
-						}
-
-					}
-				}
+			if models.StripQuotes(siteCont.S("siteId").String()) != stateSiteId {
+				continue
 			}
-		}
-
-		if !found {
-			return fmt.Errorf("Static Port Entry not found from API")
-		}
-
-		tp1 := &tp
-
-		*ss = *tp1
-		return nil
-	}
-}
-
-func testAccCheckMSOSchemaSiteAnpEpgBulkStaticPortDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*client.Client)
-
-	for _, rs := range s.RootModule().Resources {
-
-		if rs.Type == "mso_schema_site_anp_epg_static_port" {
-			cont, err := client.GetViaURL("api/v1/schemas/5c4d5bb72700000401f80948")
+			if models.StripQuotes(siteCont.S("templateName").String()) != stateTemplate {
+				continue
+			}
+			anpCount, err := siteCont.ArrayCount("anps")
 			if err != nil {
-				return nil
-			} else {
-				count, err := cont.ArrayCount("sites")
+				continue
+			}
+			for j := 0; j < anpCount; j++ {
+				anpCont, err := siteCont.ArrayElement(j, "anps")
 				if err != nil {
-					return fmt.Errorf("No Site found")
+					return err
 				}
-
-				for i := 0; i < count; i++ {
-					tempCont, err := cont.ArrayElement(i, "sites")
+				anpRef := models.StripQuotes(anpCont.S("anpRef").String())
+				anpSplit := strings.Split(anpRef, "/")
+				if len(anpSplit) < 7 || anpSplit[6] != stateAnp {
+					continue
+				}
+				epgCount, err := anpCont.ArrayCount("epgs")
+				if err != nil {
+					continue
+				}
+				for k := 0; k < epgCount; k++ {
+					epgCont, err := anpCont.ArrayElement(k, "epgs")
 					if err != nil {
 						return err
 					}
-					apisiteId := models.StripQuotes(tempCont.S("siteId").String())
-					apiTemplateName := models.StripQuotes(tempCont.S("templateName").String())
-					if apiTemplateName == "Template1" && apisiteId == "5c7c95b25100008f01c1ee3c" {
-						anpCount, err := tempCont.ArrayCount("anps")
-						if err != nil {
-							return fmt.Errorf("Unable to get ANP list")
-						}
-						for j := 0; j < anpCount; j++ {
-							anpCont, err := tempCont.ArrayElement(j, "anps")
-							if err != nil {
-								return err
-							}
-							anpRef := models.StripQuotes(anpCont.S("anpRef").String())
-							re := regexp.MustCompile("/schemas/(.*)/templates/(.*)/anps/(.*)")
-							match := re.FindStringSubmatch(anpRef)
-							if match[3] == "ANP" {
-								epgCount, err := anpCont.ArrayCount("epgs")
-								if err != nil {
-									return fmt.Errorf("Unable to get EPG list")
-								}
-								for k := 0; k < epgCount; k++ {
-									epgCont, err := anpCont.ArrayElement(k, "epgs")
-									if err != nil {
-										return err
-									}
-									apiEpgRef := models.StripQuotes(epgCont.S("epgRef").String())
-									re := regexp.MustCompile("/schemas/(.*)/templates/(.*)/epgs/(.*)")
-									match := re.FindStringSubmatch(apiEpgRef)
-									apiEPG := match[3]
-									if apiEPG == "DB" {
-										portCount, err := epgCont.ArrayCount("staticPorts")
-										if err != nil {
-											return fmt.Errorf("Unable to get Static Port list")
-										}
-										for l := 0; l < portCount; l++ {
-											portCont, err := epgCont.ArrayElement(l, "staticPorts")
-											if err != nil {
-												return err
-											}
-											portpath := fmt.Sprintf("topology/pod-9/paths-112/pathep-[eth1/10]")
-											apiportpath := models.StripQuotes(portCont.S("path").String())
-											if portpath == apiportpath {
-												return fmt.Errorf("The static port entry still exists")
-											}
-										}
-									}
-								}
-							}
-						}
+					epgRef := models.StripQuotes(epgCont.S("epgRef").String())
+					epgSplit := strings.Split(epgRef, "/")
+					if len(epgSplit) < 9 || epgSplit[8] != stateEpg {
+						continue
+					}
+					portCount, err := epgCont.ArrayCount("staticPorts")
+					if err != nil {
+						// No staticPorts key — already empty.
+						continue
+					}
+					if portCount > 0 {
+						return fmt.Errorf(
+							"mso_schema_site_anp_epg_bulk_staticport (site=%s, template=%s, anp=%s, epg=%s) still has %d static port(s) on schema %s",
+							stateSiteId, stateTemplate, stateAnp, stateEpg, portCount, schemaId,
+						)
 					}
 				}
 			}
 		}
 	}
 	return nil
-}
-
-func testAccCheckMSOSchemaSiteAnpEpgBulkStaticPortAttributes(ethertype string, ss *SchemaSiteAnpEpgBulkStaticPort) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		if 50 != ss.portencapvlan {
-			return fmt.Errorf("Bad Static Port Encap Vlan value %v", ss.portencapvlan)
-		}
-
-		if "lazy" != ss.deploymentimmediacy {
-			return fmt.Errorf("Bad Static Port Deployment Immediacy value %s", ss.deploymentimmediacy)
-		}
-		return nil
-	}
-}
-
-type SchemaSiteAnpEpgBulkStaticPort struct {
-	portencapvlan       int
-	deploymentimmediacy string
-	mode                string
 }

@@ -6,7 +6,7 @@ import (
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 func resourceMSOUser() *schema.Resource {
@@ -78,6 +78,7 @@ func resourceMSOUser() *schema.Resource {
 				Required: true,
 			},
 		}),
+		DeprecationMessage: nd32DeprecationMessage("mso_user"),
 	}
 }
 

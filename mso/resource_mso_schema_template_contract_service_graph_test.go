@@ -2,35 +2,21 @@ package mso
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
-func TestAccMSOSchemaTemplateContractServiceGraph_Basic(t *testing.T) {
-	var instance TemplateContractServiceGraph
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckMSOSchemaTemplateContractServiceGraphDestroy,
-		Steps: []resource.TestStep{
-			{
-				Config: testAccCheckMSOTemplateContractServiceGraphConfig_basic("BD1"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMSOSchemaTemplateContractServiceGraphExists("mso_schema_template_contract_service_graph.sg1", &instance),
-					testAccCheckMSOSchemaTemplateContractServiceGraphAttributes("BD1", &instance),
-				),
-			},
-		},
-	})
-}
+// msoSchemaTemplateContractServiceGraphSchemaId is set during the first test
+// step's Check to capture the dynamic schema ID for use in the manual deletion
+// PreConfig step.
+var msoSchemaTemplateContractServiceGraphSchemaId string
 
-func TestAccMSOSchemaTemplateContractServiceGraph_Update(t *testing.T) {
-	var instance TemplateContractServiceGraph
+func TestAccMSOSchemaTemplateContractServiceGraphResource(t *testing.T) {
+	resourceRef := "mso_schema_template_contract_service_graph." + msoSchemaTemplateContractName
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
@@ -38,181 +24,108 @@ func TestAccMSOSchemaTemplateContractServiceGraph_Update(t *testing.T) {
 		CheckDestroy: testAccCheckMSOSchemaTemplateContractServiceGraphDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCheckMSOTemplateContractServiceGraphConfig_basic("BD1"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMSOSchemaTemplateContractServiceGraphExists("mso_schema_template_contract_service_graph.sg1", &instance),
-					testAccCheckMSOSchemaTemplateContractServiceGraphAttributes("BD1", &instance),
-				),
-			},
-			{
-				Config: testAccCheckMSOTemplateContractServiceGraphConfig_basic("BD2"),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckMSOSchemaTemplateContractServiceGraphExists("mso_schema_template_contract_service_graph.sg1", &instance),
-					testAccCheckMSOSchemaTemplateContractServiceGraphAttributes("BD2", &instance),
-				),
-			},
-		},
-	})
-}
-
-func testAccCheckMSOTemplateContractServiceGraphConfig_basic(bdName string) string {
-	return fmt.Sprintf(`
-	resource "mso_schema_template_contract_service_graph" "sg1" {
-		schema_id = "5f11b0e22c00001c4a812a2a"
-		site_id = "5c7c95b25100008f01c1ee3c"
-		template_name = "Template1"
-		contract_name = "UntitledContract1"
-		service_graph_name = "sg1"
-		node_relationship {
-		  provider_connector_bd_name = "%s"
-		  consumer_connector_bd_name = "BD2"
-		  provider_connector_cluster_interface = "test"
-		  consumer_connector_cluster_interface = "test"
-		}
-	}`, bdName)
-}
-
-func testAccCheckMSOSchemaTemplateContractServiceGraphExists(ContracGraph string, tc *TemplateContractServiceGraph) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		client := testAccProvider.Meta().(*client.Client)
-		rs, error := s.RootModule().Resources[ContracGraph]
-
-		if !error {
-			return fmt.Errorf("Contract  Serive Graph %s not found", ContracGraph)
-		}
-		if rs.Primary.ID == "" {
-			return fmt.Errorf("No Schema id was set")
-		}
-
-		cont, err := client.GetViaURL("api/v1/schemas/5f11b0e22c00001c4a812a2a")
-		if err != nil {
-			return err
-		}
-		count, err := cont.ArrayCount("templates")
-		if err != nil {
-			return fmt.Errorf("No Template found")
-		}
-		tp := TemplateContractServiceGraph{}
-		found := false
-		for i := 0; i < count; i++ {
-			tempCont, err := cont.ArrayElement(i, "templates")
-			if err != nil {
-				return err
-			}
-
-			apiTemplateName := models.StripQuotes(tempCont.S("name").String())
-			if apiTemplateName == "Template1" {
-				contractCount, err := tempCont.ArrayCount("contracts")
-
-				if err != nil {
-					return fmt.Errorf("Unable to get Contract list")
-				}
-
-				for j := 0; j < contractCount; j++ {
-					contractCont, err := tempCont.ArrayElement(j, "contracts")
-					if err != nil {
-						return err
-					}
-
-					apiContract := models.StripQuotes(contractCont.S("name").String())
-
-					if apiContract == "UntitledContract1" {
-						if contractCont.Exists("serviceGraphRelationship") {
-							graphRelation := contractCont.S("serviceGraphRelationship")
-
-							graphRef := models.StripQuotes(graphRelation.S("serviceGraphRef").String())
-							tokens := strings.Split(graphRef, "/")
-							if tokens[len(tokens)-1] == "sg1" {
-								tp.Name = tokens[len(tokens)-1]
-
-								nodeCount, _ := graphRelation.ArrayCount("serviceNodesRelationship")
-								for k := 0; k < nodeCount; k++ {
-									node, err := graphRelation.ArrayElement(k, "serviceNodesRelationship")
-									if err != nil {
-										return fmt.Errorf("Unable to parse Node relationship for service graph")
-									}
-
-									probdRef := models.StripQuotes(node.S("providerConnector", "bdRef").String())
-									probdRefTokens := strings.Split(probdRef, "/")
-									tp.ProviderBD = probdRefTokens[len(probdRefTokens)-1]
-
-									conbdRef := models.StripQuotes(node.S("consumerConnector", "bdRef").String())
-									conbdRefTokens := strings.Split(conbdRef, "/")
-									tp.ConsumerBD = conbdRefTokens[len(conbdRefTokens)-1]
-
-									found = true
-									break
-								}
-							}
+				PreConfig: func() {
+					fmt.Println("Test: Create contract service graph with a firewall node using BD1 for provider and consumer")
+				},
+				Config: testAccMSOSchemaTemplateContractServiceGraphConfigCreate(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet(resourceRef, "id"),
+					resource.TestCheckResourceAttr(resourceRef, "template_name", msoSchemaTemplateName),
+					resource.TestCheckResourceAttr(resourceRef, "contract_name", msoSchemaTemplateContractName),
+					resource.TestCheckResourceAttr(resourceRef, "service_graph_name", msoSchemaTemplateServiceGraphName),
+					resource.TestCheckResourceAttr(resourceRef, "node_relationship.#", "1"),
+					resource.TestCheckResourceAttr(resourceRef, "node_relationship.0.provider_connector_bd_name", msoSchemaTemplateBdName),
+					resource.TestCheckResourceAttr(resourceRef, "node_relationship.0.consumer_connector_bd_name", msoSchemaTemplateBdName),
+					func(s *terraform.State) error {
+						rs, ok := s.RootModule().Resources[resourceRef]
+						if !ok {
+							return fmt.Errorf("contract service graph resource not found in state")
 						}
+						msoSchemaTemplateContractServiceGraphSchemaId = rs.Primary.Attributes["schema_id"]
+						return nil
+					},
+				),
+			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Update contract service graph node_relationship to use BD2 for provider and consumer")
+				},
+				Config: testAccMSOSchemaTemplateContractServiceGraphConfigUpdate(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceRef, "node_relationship.#", "1"),
+					resource.TestCheckResourceAttr(resourceRef, "node_relationship.0.provider_connector_bd_name", msoSchemaTemplateBdName2),
+					resource.TestCheckResourceAttr(resourceRef, "node_relationship.0.consumer_connector_bd_name", msoSchemaTemplateBdName2),
+				),
+			},
+			{
+				PreConfig:         func() { fmt.Println("Test: Import contract service graph") },
+				ResourceName:      resourceRef,
+				ImportState:       true,
+				ImportStateIdFunc: testAccMSOSchemaTemplateContractServiceGraphImportStateId(resourceRef),
+				ImportStateVerify: true,
+			},
+			{
+				PreConfig: func() {
+					fmt.Println("Test: Recreate contract service graph after manual deletion of service graph relationship")
+					msoClient := testAccProvider.Meta().(*client.Client)
+					path := fmt.Sprintf("/templates/%s/contracts/%s/serviceGraphRelationship", msoSchemaTemplateName, msoSchemaTemplateContractName)
+					_, err := msoClient.PatchbyID(
+						fmt.Sprintf("api/v1/schemas/%s", msoSchemaTemplateContractServiceGraphSchemaId),
+						models.GetRemovePatchPayload(path),
+					)
+					if err != nil {
+						t.Fatalf("Failed to manually delete service graph relationship: %v", err)
 					}
-				}
-			}
-		}
-
-		if !found {
-			return fmt.Errorf("Contract Service Graph not found from API")
-		}
-
-		tp1 := &tp
-
-		*tc = *tp1
-		return nil
-	}
+				},
+				Config: testAccMSOSchemaTemplateContractServiceGraphConfigCreate(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet(resourceRef, "id"),
+					resource.TestCheckResourceAttr(resourceRef, "service_graph_name", msoSchemaTemplateServiceGraphName),
+					resource.TestCheckResourceAttr(resourceRef, "node_relationship.#", "1"),
+					resource.TestCheckResourceAttr(resourceRef, "node_relationship.0.provider_connector_bd_name", msoSchemaTemplateBdName),
+					resource.TestCheckResourceAttr(resourceRef, "node_relationship.0.consumer_connector_bd_name", msoSchemaTemplateBdName),
+				),
+			},
+		},
+	})
 }
 
 func testAccCheckMSOSchemaTemplateContractServiceGraphDestroy(s *terraform.State) error {
-	client := testAccProvider.Meta().(*client.Client)
-
+	msoClient := testAccProvider.Meta().(*client.Client)
 	for _, rs := range s.RootModule().Resources {
-
-		if rs.Type == "mso_schema_template_contract_service_graph" {
-			cont, err := client.GetViaURL("api/v1/schemas/5f11b0e22c00001c4a812a2a")
+		if rs.Type != "mso_schema_template_contract_service_graph" {
+			continue
+		}
+		cont, err := msoClient.GetViaURL(fmt.Sprintf("api/v1/schemas/%s", rs.Primary.Attributes["schema_id"]))
+		if err != nil {
+			return nil
+		}
+		templatesCount, err := cont.ArrayCount("templates")
+		if err != nil {
+			return nil
+		}
+		for i := 0; i < templatesCount; i++ {
+			templateCont, err := cont.ArrayElement(i, "templates")
 			if err != nil {
-				return nil
-			} else {
-				count, err := cont.ArrayCount("templates")
+				continue
+			}
+			if models.StripQuotes(templateCont.S("name").String()) != rs.Primary.Attributes["template_name"] {
+				continue
+			}
+			contractCount, err := templateCont.ArrayCount("contracts")
+			if err != nil {
+				continue
+			}
+			for j := 0; j < contractCount; j++ {
+				contractCont, err := templateCont.ArrayElement(j, "contracts")
 				if err != nil {
-					return fmt.Errorf("No Template found")
+					continue
 				}
-
-				for i := 0; i < count; i++ {
-					tempCont, err := cont.ArrayElement(i, "templates")
-					if err != nil {
-						return err
-					}
-
-					apiTemplateName := models.StripQuotes(tempCont.S("name").String())
-					if apiTemplateName == "Template1" {
-						contractCount, err := tempCont.ArrayCount("contracts")
-
-						if err != nil {
-							return fmt.Errorf("Unable to get Contract list")
-						}
-
-						for j := 0; j < contractCount; j++ {
-							contractCont, err := tempCont.ArrayElement(j, "contracts")
-							if err != nil {
-								return err
-							}
-
-							apiContract := models.StripQuotes(contractCont.S("name").String())
-
-							if apiContract == "UntitledContract1" {
-								if contractCont.Exists("serviceGraphRelationship") {
-									graphRelation := contractCont.S("serviceGraphRelationship")
-
-									graphRef := models.StripQuotes(graphRelation.S("serviceGraphRef").String())
-									tokens := strings.Split(graphRef, "/")
-									name := tokens[len(tokens)-1]
-
-									if name == "sg1" {
-										return fmt.Errorf("Contract Service Graph still exists")
-									}
-								}
-							}
-						}
-					}
+				if models.StripQuotes(contractCont.S("name").String()) != rs.Primary.Attributes["contract_name"] {
+					continue
+				}
+				if contractCont.Exists("serviceGraphRelationship") {
+					return fmt.Errorf("mso_schema_template_contract_service_graph (%s) still exists", rs.Primary.ID)
 				}
 			}
 		}
@@ -220,25 +133,70 @@ func testAccCheckMSOSchemaTemplateContractServiceGraphDestroy(s *terraform.State
 	return nil
 }
 
-func testAccCheckMSOSchemaTemplateContractServiceGraphAttributes(bdName string, tc *TemplateContractServiceGraph) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		if "sg1" != tc.Name {
-			return fmt.Errorf("Bad Template Contract Service Graph name %v", tc.Name)
+func testAccMSOSchemaTemplateContractServiceGraphImportStateId(resourceRef string) resource.ImportStateIdFunc {
+	return func(s *terraform.State) (string, error) {
+		rs, ok := s.RootModule().Resources[resourceRef]
+		if !ok {
+			return "", fmt.Errorf("resource not found: %s", resourceRef)
 		}
-
-		if bdName != tc.ProviderBD {
-			return fmt.Errorf("Bad Template Contract Service Graph Provider BD %v", tc.ProviderBD)
-		}
-
-		if "BD2" != tc.ConsumerBD {
-			return fmt.Errorf("Bad Template Contract Service Graph Consumer BD %v", tc.ConsumerBD)
-		}
-		return nil
+		return rs.Primary.ID, nil
 	}
 }
 
-type TemplateContractServiceGraph struct {
-	Name       string
-	ProviderBD string
-	ConsumerBD string
+// testAccMSOSchemaTemplateContractServiceGraphBaseConfig builds the shared
+// prerequisites: site, tenant, schema, VRF, BD1, filter entry, contract, and
+// VRF-as-provider association. The VRF-contract provider is required by NDO
+// when a service graph is attached to a contract.
+func testAccMSOSchemaTemplateContractServiceGraphBaseConfig() string {
+	return fmt.Sprintf(`%s%s%s%s%s%s%s%s`,
+		testSiteConfigAnsibleTest(),
+		testTenantConfig(),
+		testSchemaConfig(),
+		testSchemaTemplateVrfConfig(),
+		testSchemaTemplateBdConfig(),
+		testSchemaTemplateFilterEntryConfig(),
+		testSchemaTemplateContractConfig(),
+		testSchemaTemplateVrfContractConfig(),
+	)
+}
+
+// testAccMSOSchemaTemplateContractServiceGraphConfig builds the full config
+// with an optional extra prerequisites block (e.g. BD2) and a specific BD
+// name for the node_relationship connectors.
+func testAccMSOSchemaTemplateContractServiceGraphConfig(extraPrereqs, bdName string) string {
+	return fmt.Sprintf(`%[1]s
+resource "mso_schema_template_service_graph" "%[2]s" {
+  schema_id          = mso_schema.%[3]s.id
+  template_name      = "%[4]s"
+  service_graph_name = "%[2]s"
+  service_node {
+    type = "firewall"
+  }
+}
+
+resource "mso_schema_template_contract_service_graph" "%[5]s" {
+  schema_id          = mso_schema_template_vrf_contract.%[5]s_provider.schema_id
+  template_name      = "%[4]s"
+  contract_name      = mso_schema_template_contract.%[5]s.contract_name
+  service_graph_name = mso_schema_template_service_graph.%[2]s.service_graph_name
+  node_relationship {
+    provider_connector_bd_name = mso_schema_template_bd.%[6]s.name
+    consumer_connector_bd_name = mso_schema_template_bd.%[6]s.name
+  }
+}
+`, testAccMSOSchemaTemplateContractServiceGraphBaseConfig()+extraPrereqs,
+		msoSchemaTemplateServiceGraphName, // %[2]s
+		msoSchemaName,                     // %[3]s
+		msoSchemaTemplateName,             // %[4]s
+		msoSchemaTemplateContractName,     // %[5]s
+		bdName,                            // %[6]s
+	)
+}
+
+func testAccMSOSchemaTemplateContractServiceGraphConfigCreate() string {
+	return testAccMSOSchemaTemplateContractServiceGraphConfig("", msoSchemaTemplateBdName)
+}
+
+func testAccMSOSchemaTemplateContractServiceGraphConfigUpdate() string {
+	return testAccMSOSchemaTemplateContractServiceGraphConfig(testSchemaTemplateBdConfig2(), msoSchemaTemplateBdName2)
 }

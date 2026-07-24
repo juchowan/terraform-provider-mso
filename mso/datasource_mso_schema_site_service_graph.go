@@ -5,8 +5,8 @@ import (
 	"log"
 
 	"github.com/ciscoecosystem/mso-go-client/client"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func datasourceMSOSchemaSiteServiceGraph() *schema.Resource {
@@ -86,10 +86,13 @@ func dataSourceMSOSchemaSiteServiceGraphRead(d *schema.ResourceData, m interface
 	graphCont, _, err := getSiteServiceGraphCont(cont, schemaId, templateName, siteId, graphName)
 	if err != nil {
 		d.SetId("")
-		return nil
+		return err
 	}
 
 	serviceNodeList, err := setServiceNodeList(graphCont)
+	if err != nil {
+		return err
+	}
 	d.Set("service_node", serviceNodeList)
 
 	d.Set("schema_id", schemaId)

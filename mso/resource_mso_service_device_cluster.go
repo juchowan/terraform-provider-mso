@@ -1,6 +1,7 @@
 package mso
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
@@ -8,8 +9,8 @@ import (
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func resourceMSOServiceDeviceCluster() *schema.Resource {
@@ -57,7 +58,7 @@ func resourceMSOServiceDeviceCluster() *schema.Resource {
 				}, false),
 			},
 			"interface_properties": {
-				Type:     schema.TypeSet,
+				Type:     schema.TypeList,
 				Required: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
@@ -68,52 +69,57 @@ func resourceMSOServiceDeviceCluster() *schema.Resource {
 						"bd_uuid": {
 							Type:     schema.TypeString,
 							Optional: true,
-							Computed: true,
 						},
 						"external_epg_uuid": {
 							Type:     schema.TypeString,
 							Optional: true,
-							Computed: true,
 						},
 						"ipsla_monitoring_policy_uuid": {
 							Type:     schema.TypeString,
 							Optional: true,
-							Computed: true,
+							// Computed: true,
 						},
 						"qos_policy_uuid": {
 							Type:     schema.TypeString,
 							Optional: true,
-							Computed: true,
+							// Computed: true,
 						},
 						"preferred_group": {
 							Type:     schema.TypeBool,
 							Optional: true,
-							Computed: true,
+							// Computed: true,
 						},
 						"rewrite_source_mac": {
 							Type:     schema.TypeBool,
 							Optional: true,
-							Computed: true,
+							// Computed: true,
 						},
 						"anycast": {
 							Type:     schema.TypeBool,
 							Optional: true,
-							Computed: true,
+							// Computed: true,
 						},
 						"config_static_mac": {
 							Type:     schema.TypeBool,
 							Optional: true,
-							Computed: true,
+							// Computed: true,
 						},
 						"is_backup_redirect_ip": {
 							Type:     schema.TypeBool,
 							Optional: true,
-							Computed: true,
+							// Computed: true,
 						},
 						"load_balance_hashing": {
 							Type:     schema.TypeString,
 							Optional: true,
-							Default:  "sourceDestinationAndProtocol",
+							// NDO server-defaults loadBalanceHashing to
+							// "sourceDestinationAndProtocol" on every interface
+							// once redirect is enabled (anycast/IPSLA/etc.), so
+							// suppress the cosmetic diff when HCL leaves it
+							// unset and state already holds the NDO default.
+							DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+								return new == "" && old == "sourceDestinationAndProtocol"
+							},
 							ValidateFunc: validation.StringInSlice([]string{
 								"sourceDestinationAndProtocol", "sourceIP", "destinationIP",
 							}, false),
@@ -121,34 +127,60 @@ func resourceMSOServiceDeviceCluster() *schema.Resource {
 						"pod_aware_redirection": {
 							Type:     schema.TypeBool,
 							Optional: true,
+							// Computed: true,
+						},
+						"redirect": {
+							Type:     schema.TypeBool,
+							Optional: true,
 							Computed: true,
+							// Direct control over the NDO interface-level
+							// `redirect` flag. Initial value is taken from
+							// this attribute (`false` when omitted), then
+							// auto-upgraded to true if any side-effect attr
+							// requires it (anycast, rewrite_source_mac,
+							// pod_aware_redirection, load_balance_hashing,
+							// ipsla_monitoring_policy_uuid). This preserves
+							// NDO's invariant that those side-effects require
+							// redirect=true, while still letting the user
+							// enable redirect explicitly when no side-effect
+							// attr is set — required for cases where NDO
+							// rejects the auto-derivation shim (e.g. L1
+							// activeStandby rejects podAwareRedirection but
+							// still needs redirect=true on the interface
+							// to bind pbr_destinations on the site bucket).
 						},
 						"resilient_hashing": {
 							Type:     schema.TypeBool,
 							Optional: true,
-							Computed: true,
+							// Computed: true,
 						},
 						"tag_based_sorting": {
 							Type:     schema.TypeBool,
 							Optional: true,
-							Computed: true,
+							// Computed: true,
 						},
 						"min_threshold": {
-							Type:         schema.TypeInt,
-							Optional:     true,
-							Computed:     true,
+							Type:     schema.TypeInt,
+							Optional: true,
+							// Computed:     true,
 							ValidateFunc: validation.IntBetween(0, 100),
 						},
 						"max_threshold": {
-							Type:         schema.TypeInt,
-							Optional:     true,
-							Computed:     true,
+							Type:     schema.TypeInt,
+							Optional: true,
+							// Computed:     true,
 							ValidateFunc: validation.IntBetween(0, 100),
 						},
 						"threshold_down_action": {
 							Type:     schema.TypeString,
 							Optional: true,
-							Default:  "deny",
+							// NDO server-defaults thresholdDownAction to "deny"
+							// on every interface, so suppress the cosmetic diff
+							// when HCL leaves it unset and state already holds
+							// the NDO default.
+							DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+								return new == "" && old == "deny"
+							},
 							ValidateFunc: validation.StringInSlice([]string{
 								"permit", "deny", "bypass",
 							}, false),
@@ -157,14 +189,18 @@ func resourceMSOServiceDeviceCluster() *schema.Resource {
 				},
 			},
 		},
-		CustomizeDiff: func(d *schema.ResourceDiff, m interface{}) error {
+		CustomizeDiff: func(ctx context.Context, d *schema.ResourceDiff, m interface{}) error {
 			interfaceValue, ok := d.GetOk("interface_properties")
 			if !ok {
 				return nil
 			}
-			set := interfaceValue.(*schema.Set)
-			for _, raw := range set.List() {
+			for i, raw := range interfaceValue.([]interface{}) {
 				listItem := raw.(map[string]interface{})
+				bdKey := fmt.Sprintf("interface_properties.%d.bd_uuid", i)
+				extKey := fmt.Sprintf("interface_properties.%d.external_epg_uuid", i)
+				if !d.NewValueKnown(bdKey) || !d.NewValueKnown(extKey) {
+					continue
+				}
 				count := 0
 				if bdUUID, _ := listItem["bd_uuid"].(string); bdUUID != "" {
 					count++
@@ -182,26 +218,60 @@ func resourceMSOServiceDeviceCluster() *schema.Resource {
 }
 
 func buildServiceDeviceClusterInterfacesPayload(d *schema.ResourceData) []map[string]interface{} {
-	interfacesSet := d.Get("interface_properties").(*schema.Set)
-	interfaces := interfacesSet.List()
+	interfaces := d.Get("interface_properties").([]interface{})
 
 	payload := make([]map[string]interface{}, len(interfaces))
 
 	for i, val := range interfaces {
 		iface := val.(map[string]interface{})
 
+		interfacePayload := map[string]interface{}{
+			"name": iface["name"].(string),
+		}
+
+		// `redirect` is set first from the user value (or the TypeBool
+		// zero value when omitted). The auto-derivation branches below
+		// only ever flip it to true — never back to false — so a
+		// side-effect attr like anycast=true with redirect=false in HCL
+		// is auto-upgraded to true, preserving NDO's invariant that
+		// those flags require redirect=true.
+		if v, ok := iface["redirect"]; ok {
+			interfacePayload["redirect"] = v.(bool)
+		}
+
 		advancedConfig := make(map[string]interface{})
 		if v, ok := iface["preferred_group"]; ok {
 			advancedConfig["preferredGroup"] = v.(bool)
+		}
+		if v, ok := iface["pod_aware_redirection"]; ok {
+			podAwareRedirection := v.(bool)
+			advancedConfig["podAwareRedirection"] = podAwareRedirection
+			if podAwareRedirection {
+				interfacePayload["redirect"] = true
+			}
+		}
+		if v, ok := iface["anycast"]; ok {
+			anycast := v.(bool)
+			advancedConfig["anycast"] = anycast
+			if anycast {
+				interfacePayload["redirect"] = true
+			}
+		}
+		if v, ok := iface["rewrite_source_mac"]; ok {
+			rewriteSourceMac := v.(bool)
+			advancedConfig["rewriteSourceMac"] = rewriteSourceMac
+			if rewriteSourceMac {
+				interfacePayload["redirect"] = true
+			}
 		}
 		if v, ok := iface["qos_policy_uuid"].(string); ok {
 			advancedConfig["qosPolicyRef"] = v
 		}
 
-		interfacePayload := map[string]interface{}{
-			"name": iface["name"].(string),
+		if v, ok := iface["load_balance_hashing"].(string); ok && v != "" {
+			advancedConfig["loadBalanceHashing"] = v
+			interfacePayload["redirect"] = true
 		}
-
 		if v, ok := iface["ipsla_monitoring_policy_uuid"].(string); ok {
 			interfacePayload["ipslaMonitoringRef"] = v
 		}
@@ -220,19 +290,6 @@ func buildServiceDeviceClusterInterfacesPayload(d *schema.ResourceData) []map[st
 			if v, ok := iface["tag_based_sorting"]; ok {
 				advancedConfig["tag"] = v.(bool)
 			}
-			if v, ok := iface["rewrite_source_mac"]; ok {
-				advancedConfig["rewriteSourceMac"] = v.(bool)
-			}
-			if v, ok := iface["anycast"]; ok {
-				advancedConfig["anycast"] = v.(bool)
-			}
-			if v, ok := iface["pod_aware_redirection"]; ok {
-				advancedConfig["podAwareRedirection"] = v.(bool)
-			}
-			if v, ok := iface["load_balance_hashing"].(string); ok {
-				advancedConfig["loadBalanceHashing"] = v
-			}
-
 			thresholdConfig := make(map[string]interface{})
 			if v, ok := iface["min_threshold"].(int); ok && v >= 0 {
 				thresholdConfig["minThreshold"] = v
@@ -323,6 +380,23 @@ func setServiceDeviceClusterData(d *schema.ResourceData, response *container.Con
 		if iface.Exists("ipslaMonitoringRef") {
 			prop["ipsla_monitoring_policy_uuid"] = models.StripQuotes(iface.S("ipslaMonitoringRef").String())
 		}
+		// NDO server-defaults loadBalanceHashing="sourceDestinationAndProtocol"
+		// and thresholdDownAction="deny" on every interface even when redirect
+		// is off. Persisting those defaults into state on bare interfaces makes
+		// the cluster Update builder later treat them as user intent (the
+		// builder sets redirect=true whenever load_balance_hashing != "") and
+		// also leaks values across TypeList positional shifts on shrink (where
+		// slot N's prior-state attributes carry over to a new name in slot N).
+		// Gate both reads on the NDO interface-level redirect flag so bare
+		// interfaces stay bare in state.
+		redirectEnabled := false
+		if iface.Exists("redirect") {
+			if v, ok := iface.S("redirect").Data().(bool); ok {
+				redirectEnabled = v
+			}
+		}
+		prop["redirect"] = redirectEnabled
+
 		if iface.Exists("advancedIntfConfig") {
 			advancedConfig := iface.S("advancedIntfConfig")
 			if advancedConfig.Exists("qosPolicyRef") {
@@ -357,10 +431,10 @@ func setServiceDeviceClusterData(d *schema.ResourceData, response *container.Con
 			if advancedConfig.Exists("tag") {
 				prop["tag_based_sorting"] = advancedConfig.S("tag").Data().(bool)
 			}
-			if advancedConfig.Exists("loadBalanceHashing") {
+			if advancedConfig.Exists("loadBalanceHashing") && redirectEnabled {
 				prop["load_balance_hashing"] = models.StripQuotes(advancedConfig.S("loadBalanceHashing").String())
 			}
-			if advancedConfig.Exists("thresholdForRedirect") {
+			if advancedConfig.Exists("thresholdForRedirect") && redirectEnabled {
 				thresholdConfig := advancedConfig.S("thresholdForRedirect")
 				if thresholdConfig.Exists("minThreshold") {
 					prop["min_threshold"] = int(thresholdConfig.S("minThreshold").Data().(float64))

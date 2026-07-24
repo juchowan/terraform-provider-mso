@@ -1,6 +1,11 @@
+// NOTE: Acceptance tests for this resource are intentionally not provided.
+// Exercising this resource requires a cloud site (AWS/Azure/GCP) attached
+// to the MSO/ND test fabric, which is not part of the CI test environment.
+
 package mso
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sort"
@@ -10,8 +15,8 @@ import (
 	"github.com/ciscoecosystem/mso-go-client/client"
 	"github.com/ciscoecosystem/mso-go-client/container"
 	"github.com/ciscoecosystem/mso-go-client/models"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 var listenerProtocols = []string{"http", "https", "tcp", "udp", "tls", "inherit"}
@@ -64,10 +69,11 @@ var listenerRedirectCodeKeys = getMapKeys(listenerRedirectCodeMap)
 
 func resourceMSOSchemaSiteContractServiceGraphListener() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceMSOSchemaSiteContractServiceGraphListenerCreate,
-		Update: resourceMSOSchemaSiteContractServiceGraphListenerUpdate,
-		Read:   resourceMSOSchemaSiteContractServiceGraphListenerRead,
-		Delete: resourceMSOSchemaSiteContractServiceGraphListenerDelete,
+		DeprecationMessage: cloudDeprecationMessage("mso_schema_site_contract_service_graph_listener"),
+		Create:             resourceMSOSchemaSiteContractServiceGraphListenerCreate,
+		Update:             resourceMSOSchemaSiteContractServiceGraphListenerUpdate,
+		Read:               resourceMSOSchemaSiteContractServiceGraphListenerRead,
+		Delete:             resourceMSOSchemaSiteContractServiceGraphListenerDelete,
 
 		Importer: &schema.ResourceImporter{
 			State: resourceMSOSchemaSiteContractServiceGraphListenerImport,
@@ -376,7 +382,7 @@ func resourceMSOSchemaSiteContractServiceGraphListener() *schema.Resource {
 			},
 		},
 		// Clear the "rules" attribute diff when its not a valid change
-		CustomizeDiff: func(diff *schema.ResourceDiff, v interface{}) error {
+		CustomizeDiff: func(ctx context.Context, diff *schema.ResourceDiff, v interface{}) error {
 			// When the listener Protocol is https
 			_, listenerProtocol := diff.GetChange("protocol")
 			if listenerProtocol.(string) == "https" {
